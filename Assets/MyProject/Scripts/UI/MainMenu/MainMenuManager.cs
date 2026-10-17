@@ -6,69 +6,22 @@ namespace ColmeiaStudios.SoMaisUmPedido
 {
     public class MainMenuManager : MonoBehaviour
     {
-        [Header("Role selection")]
-        [SerializeField] private Button cookButton;
-        [SerializeField] private Button deliveryButton;
-        [SerializeField] private Image cookSelectionImage;
-        [SerializeField] private Image deliverySelectionImage;
-
+        [Header("Menu options")]
+        [SerializeField] private Button howToPlayButton;
+        [SerializeField] private Button creditsButton;
         [Header("Scene")]
-        [SerializeField] private string gameplaySceneName = "Gameplay";
-
-        private bool playerOneIsCook = true;
+        [SerializeField] private string characterSelectionSceneName = "CharacterSelection";
 
         private void Awake()
         {
-            if (cookButton != null)
-            {
-                cookButton.onClick.AddListener(SelectCook);
-            }
-
-            if (deliveryButton != null)
-            {
-                deliveryButton.onClick.AddListener(SelectDelivery);
-            }
-
-            UpdateSelectionVisuals();
+            if (howToPlayButton != null) howToPlayButton.interactable = false;
+            if (creditsButton != null) creditsButton.interactable = false;
         }
 
-        public void SelectCook()
-        {
-            playerOneIsCook = true;
-            UpdateSelectionVisuals();
-        }
-
-        public void SelectDelivery()
-        {
-            playerOneIsCook = false;
-            UpdateSelectionVisuals();
-        }
-
+        // Kept as the existing Start button callback in MainMenu.unity.
         public void StartGame()
         {
-            if (playerOneIsCook)
-            {
-                MatchSettings.SetRoles(PlayerRole.Cook, PlayerRole.Delivery);
-            }
-            else
-            {
-                MatchSettings.SetRoles(PlayerRole.Delivery, PlayerRole.Cook);
-            }
-
-            SceneManager.LoadScene(gameplaySceneName);
-        }
-
-        private void UpdateSelectionVisuals()
-        {
-            if (cookSelectionImage != null)
-            {
-                cookSelectionImage.enabled = playerOneIsCook;
-            }
-
-            if (deliverySelectionImage != null)
-            {
-                deliverySelectionImage.enabled = !playerOneIsCook;
-            }
+            SceneManager.LoadScene(characterSelectionSceneName);
         }
     }
 }

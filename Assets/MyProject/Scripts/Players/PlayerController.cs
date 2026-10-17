@@ -105,17 +105,19 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             baseMoveSpeed = moveSpeed;
-            CacheInputActions();
         }
 
         private void Start()
         {
-            if (!isConfigured)
+            // When a GameManager is present it owns the two-player setup.
+            // Wait for its explicit device assignment instead of binding
+            // this slot to whichever global device happens to be current.
+            if (!isConfigured && GameManager.Instance == null)
             {
                 Configure(assignedRole, playerConfig, useMouseLook, playerActionMap, controlScheme);
             }
 
-            if (kifomePhone != null)
+            if (kifomePhone != null && GameManager.Instance == null)
             {
                 kifomePhone.BindGameplay(this, GameManager.Instance);
             }
@@ -170,7 +172,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 playerInput.defaultActionMap = playerActionMap;
                 playerInput.defaultControlScheme = controlScheme;
-                ApplyControlScheme();
+                playerInput.neverAutoSwitchControlSchemes = true;
                 if (playerInput.actions != null &&
                     playerInput.actions.FindActionMap(playerActionMap, false) != null)
                 {
@@ -181,7 +183,17 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     Debug.LogError($"Action map '{playerActionMap}' was not found for {name}.", this);
                 }
 
-                CacheInputActions();
+                if (!CacheInputActions())
+                {
+                    isConfigured = false;
+                    return;
+                }
+            }
+            else
+            {
+                Debug.LogError($"PlayerInput is missing on {name}; this player cannot receive controls.", this);
+                isConfigured = false;
+                return;
             }
 
             baseMoveSpeed = moveSpeed;
@@ -195,64 +207,133 @@ namespace ColmeiaStudios.SoMaisUmPedido
             isConfigured = true;
         }
 
-        private void ApplyControlScheme()
+        public bool ConfigureMatchInput(PlayerRole role, PlayerConfig config, InputDevice device, Mouse assignedMouse, string scheme)
         {
-            if (playerInput == null || playerInput.actions == null)
+            if (playerInput == null || playerInput.actions == null || device == null || !device.added)
             {
-                return;
+                Debug.LogError($"PlayerInput, Input Actions, or assigned input device is missing/invalid for {name}.", this);
+                return false;
+            }
+
+            string actionMap;
+            InputDevice[] assignedDevices;
+            if (scheme == "Gamepad" && device is Gamepad && assignedMouse == null)
+            {
+                actionMap = "PlayerTwo";
+                assignedDevices = new[] { device };
+            }
+            else if (scheme == "KeyboardMouse" && device is Keyboard &&
+                     assignedMouse != null && assignedMouse.added)
+            {
+                actionMap = "PlayerOne";
+                assignedDevices = new InputDevice[] { device, assignedMouse };
+            }
+            else
+            {
+                Debug.LogError($"Atribuição inválida de dispositivo/esquema para {name}: {scheme}.", this);
+                return false;
+            }
+
+            if (playerInput.actions.FindActionMap(actionMap, false) == null)
+            {
+                Debug.LogError($"Action Map '{actionMap}' não existe no PlayerInput de {name}.", this);
+                return false;
             }
 
             bool schemeExists = false;
-            foreach (InputControlScheme scheme in playerInput.actions.controlSchemes)
+            foreach (InputControlScheme availableScheme in playerInput.actions.controlSchemes)
             {
-                if (scheme.name == controlScheme)
+                if (availableScheme.name == scheme)
                 {
                     schemeExists = true;
                     break;
                 }
             }
 
-            if (!schemeExists)
+            if (!schemeExists || !playerInput.user.valid)
             {
-                Debug.LogError($"Control scheme '{controlScheme}' was not found for {name}.", this);
-                return;
+                Debug.LogError($"Control Scheme '{scheme}' ou InputUser inválido em {name}.", this);
+                return false;
             }
 
-            if (controlScheme == "KeyboardMouse")
+            // This PlayerInput API performs the pairing through its InputUser,
+            // unpairs the previous devices and binds only the explicit devices
+            // passed here. Automatic global-device switching stays disabled.
+            playerInput.neverAutoSwitchControlSchemes = true;
+            try
             {
-                if (Keyboard.current != null && Mouse.current != null)
+                playerInput.SwitchCurrentControlScheme(scheme, assignedDevices);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"Falha ao parear dispositivos de {name}: {exception.Message}", this);
+                return false;
+            }
+
+            if (playerInput.currentControlScheme != scheme ||
+                playerInput.user.pairedDevices.Count != assignedDevices.Length)
+            {
+                Debug.LogError($"O PlayerInput de {name} não manteve o pareamento solicitado ({scheme}).", this);
+                return false;
+            }
+
+            for (int i = 0; i < assignedDevices.Length; i++)
+            {
+                bool isPaired = false;
+                for (int pairedIndex = 0; pairedIndex < playerInput.user.pairedDevices.Count; pairedIndex++)
                 {
-                    playerInput.SwitchCurrentControlScheme(controlScheme, Keyboard.current, Mouse.current);
+                    if (playerInput.user.pairedDevices[pairedIndex] == assignedDevices[i])
+                    {
+                        isPaired = true;
+                        break;
+                    }
+                }
+
+                if (!isPaired)
+                {
+                    Debug.LogError($"O dispositivo {assignedDevices[i].displayName} não foi pareado a {name}.", this);
+                    return false;
                 }
             }
-            else if (controlScheme == "Gamepad" && Gamepad.current != null)
-            {
-                playerInput.SwitchCurrentControlScheme(controlScheme, Gamepad.current);
-            }
+
+            Configure(role, config, scheme == "KeyboardMouse", actionMap, scheme);
+            return isConfigured;
         }
 
-        private void CacheInputActions()
+        private bool CacheInputActions()
         {
             if (playerInput == null || playerInput.actions == null)
             {
-                return;
+                Debug.LogError($"PlayerInput or Input Actions asset is missing on {name}.", this);
+                return false;
             }
 
             InputActionMap actionMap = playerInput.actions.FindActionMap(playerActionMap, false);
-            if (actionMap != null && actionMap.FindAction("TogglePhone", false) == null)
+            if (actionMap == null)
             {
-                InputAction toggleAction = actionMap.AddAction("TogglePhone", InputActionType.Button);
-                toggleAction.AddBinding("<Keyboard>/tab", groups: "KeyboardMouse");
-                toggleAction.AddBinding("<Gamepad>/buttonNorth", groups: "Gamepad");
-                toggleAction.Enable();
+                Debug.LogError($"Action Map '{playerActionMap}' was not found in PlayerInput on {name}.", this);
+                return false;
             }
 
-            moveAction = playerInput.actions.FindAction($"{playerActionMap}/Move", false);
-            lookAction = playerInput.actions.FindAction($"{playerActionMap}/Look", false);
-            interactAction = playerInput.actions.FindAction($"{playerActionMap}/Interact", false);
-            confirmAction = playerInput.actions.FindAction($"{playerActionMap}/Confirm", false);
-            cancelAction = playerInput.actions.FindAction($"{playerActionMap}/Cancel", false);
-            togglePhoneAction = playerInput.actions.FindAction($"{playerActionMap}/TogglePhone", false);
+            moveAction = FindRequiredAction(actionMap, "Move");
+            lookAction = FindRequiredAction(actionMap, "Look");
+            interactAction = FindRequiredAction(actionMap, "Interact");
+            confirmAction = FindRequiredAction(actionMap, "Confirm");
+            cancelAction = FindRequiredAction(actionMap, "Cancel");
+            togglePhoneAction = FindRequiredAction(actionMap, "TogglePhone");
+            return moveAction != null && lookAction != null && interactAction != null &&
+                   confirmAction != null && cancelAction != null && togglePhoneAction != null;
+        }
+
+        private InputAction FindRequiredAction(InputActionMap actionMap, string actionName)
+        {
+            InputAction action = actionMap.FindAction(actionName, false);
+            if (action == null)
+            {
+                Debug.LogError($"A ação obrigatória '{actionName}' não existe no Action Map '{actionMap.name}' ({name}).", this);
+            }
+
+            return action;
         }
 
         private void Update()
@@ -798,21 +879,37 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public void AssignKifomePhone(KifomePhoneUI phone)
         {
             kifomePhone = phone;
+            kifomePhone?.SetMousePointerEnabled(UsesMouseAndKeyboard);
             kifomePhone?.BindGameplay(this, GameManager.Instance);
         }
 
+        public KifomePhoneUI AssignedPhone => kifomePhone;
+
         private void HandleLunchboxSelection()
         {
-            if (assignedRole != PlayerRole.Cook || string.IsNullOrEmpty(selectedOrderId) || Keyboard.current == null)
+            if (assignedRole != PlayerRole.Cook || string.IsNullOrEmpty(selectedOrderId) || playerInput == null)
             {
                 return;
             }
 
-            if (Keyboard.current.digit1Key.wasPressedThisFrame)
+            Keyboard pairedKeyboard = null;
+            foreach (InputDevice pairedDevice in playerInput.devices)
+            {
+                if (pairedDevice is Keyboard keyboard)
+                {
+                    pairedKeyboard = keyboard;
+                    break;
+                }
+            }
+
+            if (pairedKeyboard == null)
+                return;
+
+            if (pairedKeyboard.digit1Key.wasPressedThisFrame)
             {
                 SelectLunchboxType(LunchboxType.ThreeCompartments);
             }
-            else if (Keyboard.current.digit2Key.wasPressedThisFrame)
+            else if (pairedKeyboard.digit2Key.wasPressedThisFrame)
             {
                 SelectLunchboxType(LunchboxType.FourCompartments);
             }

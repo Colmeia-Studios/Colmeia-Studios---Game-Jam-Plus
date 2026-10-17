@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -16,12 +15,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private GameManager gameManager;
         private OrderManager orderManager;
         private bool initialized;
-
-        private IEnumerator Start()
-        {
-            yield return null;
-            BindGameplay(deliveryPlayer, GameManager.Instance);
-        }
 
         private void OnEnable()
         {
@@ -44,13 +37,20 @@ namespace ColmeiaStudios.SoMaisUmPedido
             gameManager = match;
             orderManager = gameManager != null ? gameManager.Orders : null;
 
-            if (deliveryPlayer == null || deliveryPlayer.AssignedRole != PlayerRole.Delivery ||
-                gameManager == null || orderManager == null || backpackContent == null ||
-                mealNamePrefab == null || backpackCountText == null)
+            List<string> missing = new List<string>();
+            if (deliveryPlayer == null)
+                missing.Add("Delivery PlayerController (GameManager role binding)");
+            else if (deliveryPlayer.AssignedRole != PlayerRole.Delivery)
+                missing.Add("Delivery PlayerController has the wrong assigned role");
+            if (gameManager == null) missing.Add("GameManager");
+            if (orderManager == null) missing.Add("OrderManager (GameManager.Orders)");
+            if (backpackContent == null) missing.Add("Backpack Content (Inspector)");
+            if (mealNamePrefab == null) missing.Add("Meal Name Prefab (Inspector)");
+            if (backpackCountText == null) missing.Add("Backpack Count Text (Inspector)");
+
+            if (missing.Count > 0)
             {
-                Debug.LogError(
-                    "DeliveryUI requires a delivery PlayerController, backpack content, a meal-name text prefab, and a count text.",
-                    this);
+                Debug.LogError($"DeliveryUI cannot initialize. Missing or invalid: {string.Join(", ", missing)}.", this);
                 initialized = false;
                 return;
             }

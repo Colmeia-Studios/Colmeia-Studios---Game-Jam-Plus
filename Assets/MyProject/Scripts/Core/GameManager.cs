@@ -18,6 +18,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         [Header("Players")] [SerializeField] private PlayerController playerOne;
         [SerializeField] private PlayerController playerTwo;
+        [SerializeField] private DeliveryUI deliveryUI;
 
         [Header("Player spawn points")] [SerializeField]
         private Transform cookSpawn;
@@ -156,26 +157,33 @@ namespace ColmeiaStudios.SoMaisUmPedido
             PlayerConfig playerOneConfig = matchConfig != null ? matchConfig.PlayerOne : null;
             PlayerConfig playerTwoConfig = matchConfig != null ? matchConfig.PlayerTwo : null;
 
-            if (playerOneConfig != null)
+            if (MatchSettings.PlayerOneDevice != null && MatchSettings.PlayerTwoDevice != null &&
+                MatchSettings.PlayerOneDevice.added && MatchSettings.PlayerTwoDevice.added)
             {
-                playerOne.Configure(playerOneRole, playerOneConfig);
+                bool playerOneConfigured = playerOne.ConfigureMatchInput(playerOneRole, playerOneConfig,
+                    MatchSettings.PlayerOneDevice, MatchSettings.PlayerOneMouse, MatchSettings.PlayerOneScheme);
+                bool playerTwoConfigured = playerTwo.ConfigureMatchInput(playerTwoRole, playerTwoConfig,
+                    MatchSettings.PlayerTwoDevice, MatchSettings.PlayerTwoMouse, MatchSettings.PlayerTwoScheme);
+                if (!playerOneConfigured || !playerTwoConfigured)
+                {
+                    Debug.LogError("Não foi possível vincular os dispositivos aos jogadores da partida.", this);
+                    return;
+                }
             }
             else
             {
-                playerOne.Configure(playerOneRole, true, "PlayerOne", "KeyboardMouse");
-            }
-
-            if (playerTwoConfig != null)
-            {
-                playerTwo.Configure(playerTwoRole, playerTwoConfig);
-            }
-            else
-            {
-                playerTwo.Configure(playerTwoRole, false, "PlayerTwo", "Gamepad");
+                Debug.LogError("A configuração de dispositivos da partida está inválida ou um dispositivo foi desconectado.", this);
+                return;
             }
 
             Transform playerOneSpawnPoint = GetSpawnPointForRole(playerOneRole);
             Transform playerTwoSpawnPoint = GetSpawnPointForRole(playerTwoRole);
+
+            if (playerOneSpawnPoint == null || playerTwoSpawnPoint == null)
+            {
+                Debug.LogError("Configure os pontos Cook Spawn e Delivery Spawn no GameManager.", this);
+                return;
+            }
 
             if (playerOneSpawnPoint != null)
             {
@@ -187,15 +195,47 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 playerTwo.transform.SetPositionAndRotation(playerTwoSpawnPoint.position, playerTwoSpawnPoint.rotation);
             }
 
-            if (playerOneSpawn != null && playerOneRole == PlayerRole.Cook)
+            ConfigureRoleInterfaces(playerOneRole, playerTwoRole);
+
+        }
+
+        private void ConfigureRoleInterfaces(PlayerRole playerOneRole, PlayerRole playerTwoRole)
+        {
+            PlayerController cookPlayer = playerOneRole == PlayerRole.Cook ? playerOne : playerTwo;
+            PlayerController deliveryPlayer = playerOneRole == PlayerRole.Delivery ? playerOne : playerTwo;
+            KifomePhoneUI firstPhone = playerOne.AssignedPhone;
+            KifomePhoneUI secondPhone = playerTwo.AssignedPhone;
+            KifomePhoneUI cookPhone = GetPhoneForRole(firstPhone, secondPhone, PlayerRole.Cook);
+            KifomePhoneUI deliveryPhone = GetPhoneForRole(firstPhone, secondPhone, PlayerRole.Delivery);
+
+            if (cookPhone == null || deliveryPhone == null)
             {
-                playerOne.transform.SetPositionAndRotation(playerOneSpawn.position, playerOneSpawn.rotation);
+                Debug.LogError("GameManager requires one Cook phone and one Delivery phone assigned to the player slots.", this);
+                return;
             }
 
-            if (playerTwoSpawn != null && playerTwoRole == PlayerRole.Cook)
+            cookPhone.BindGameplay(cookPlayer, this);
+            deliveryPhone.BindGameplay(deliveryPlayer, this);
+            playerOne.AssignKifomePhone(playerOneRole == PlayerRole.Cook ? cookPhone : deliveryPhone);
+            playerTwo.AssignKifomePhone(playerTwoRole == PlayerRole.Cook ? cookPhone : deliveryPhone);
+
+            if (deliveryUI == null)
             {
-                playerTwo.transform.SetPositionAndRotation(playerTwoSpawn.position, playerTwoSpawn.rotation);
+                Debug.LogError("GameManager is missing its Delivery UI reference.", this);
+                return;
             }
+
+            deliveryUI.BindGameplay(deliveryPlayer, this);
+        }
+
+        private static KifomePhoneUI GetPhoneForRole(
+            KifomePhoneUI first,
+            KifomePhoneUI second,
+            PlayerRole role)
+        {
+            if (first != null && first.PhoneRole == role) return first;
+            if (second != null && second.PhoneRole == role) return second;
+            return null;
         }
 
         public bool TryGetOrder(string orderId, out OrderRecord order)
@@ -392,10 +432,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (role == PlayerRole.Cook)
             {
-                return cookSpawn != null ? cookSpawn : playerOneSpawn;
+                return cookSpawn;
             }
 
-            return deliverySpawn != null ? deliverySpawn : playerTwoSpawn;
+            return deliverySpawn;
         }
 
         private static string GetUpgradePurchaseKey(UpgradeData upgrade)
