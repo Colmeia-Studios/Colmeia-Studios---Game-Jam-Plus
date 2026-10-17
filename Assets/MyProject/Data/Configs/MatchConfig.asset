@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0dc53f07d333b0b74a3d9ba755483299, type: 3}
+  m_Name: MatchConfig
+  m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.MatchConfig
+  playerOne: {fileID: 11400000, guid: 18f2bd0d09804ce50a4a3467d666f029, type: 2}
+  playerTwo: {fileID: 11400000, guid: c720880547332c70987bf9ee5aac6a1d, type: 2}
+  orderCatalog:
+  - {fileID: 11400000, guid: 9e86f23d8052f86b082b7d8ac900ee17, type: 2}
+  houseCatalog:
+  - {fileID: 11400000, guid: 7e967a43bfd93d8f6a3596712ac633a6, type: 2}
+  - {fileID: 11400000, guid: d9f89b66bb934d4079d6c92928a7b4cd, type: 2}
+  - {fileID: 11400000, guid: 87123c5c3487169aa96d2b07b8dbd536, type: 2}
+  maximumActiveOrders: 5
+  orderDeadlineSeconds: 120
+  startHour: 11
+  endHour: 19
+  realSecondsPerGameHour: 40
+  startingBalance: 500
+  startingReputation: 5
