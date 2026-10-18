@@ -83,6 +83,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         [SerializeField] private Transform playerTwoSpawn;
 
+        [Header("Player visual layers")]
+        [SerializeField] private string playerOneVisualLayerName = "Player1Visual";
+        [SerializeField] private string playerTwoVisualLayerName = "Player2Visual";
+
         private readonly HashSet<string> paidOrderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> purchasedUpgradeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<DailyMatchResult> dailyResults = new List<DailyMatchResult>();
@@ -579,6 +583,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             PlayerController deliveryPlayer = playerOneRole == PlayerRole.Delivery ? playerOne : playerTwo;
             AssignCameraSide(cookPlayer, ScreenSide.Left);
             AssignCameraSide(deliveryPlayer, ScreenSide.Right);
+            ConfigurePlayerVisualVisibility();
             KifomePhoneUI firstPhone = playerOne.AssignedPhone;
             KifomePhoneUI secondPhone = playerTwo.AssignedPhone;
             KifomePhoneUI cookPhone = GetPhoneForRole(firstPhone, secondPhone, PlayerRole.Cook);
@@ -610,6 +615,27 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 Debug.LogError("GameManager is missing its CookPreparationUI reference.", this);
             }
+        }
+
+        private void ConfigurePlayerVisualVisibility()
+        {
+            int playerOneLayer = LayerMask.NameToLayer(playerOneVisualLayerName);
+            int playerTwoLayer = LayerMask.NameToLayer(playerTwoVisualLayerName);
+            if (playerOneLayer < 0 || playerTwoLayer < 0 || playerOneLayer == playerTwoLayer)
+            {
+                Debug.LogError(
+                    $"Create two distinct Unity layers named '{playerOneVisualLayerName}' and " +
+                    $"'{playerTwoVisualLayerName}' (GameManager Player Visual Layers).", this);
+                return;
+            }
+
+            bool playerOneConfigured = playerOne.SetCharacterVisualLayer(playerOneLayer);
+            bool playerTwoConfigured = playerTwo.SetCharacterVisualLayer(playerTwoLayer);
+            if (!playerOneConfigured || !playerTwoConfigured)
+                return;
+
+            playerOne.ConfigureCameraVisualLayers(playerOneLayer, playerTwoLayer);
+            playerTwo.ConfigureCameraVisualLayers(playerTwoLayer, playerOneLayer);
         }
 
         private void AssignCameraSide(PlayerController player, ScreenSide side)

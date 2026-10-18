@@ -26,6 +26,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [Header("Camera")] [SerializeField] private Camera playerCamera;
         [SerializeField] private Transform cameraPivot;
 
+        [Header("Character visual")]
+        [SerializeField] private PlayerCharacterVisual characterVisual;
+
         [Header("Cook transport")] [SerializeField] private Transform mealboxCarryPoint;
         [SerializeField] private Transform mealboxPreparationPoint;
 
@@ -56,6 +59,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private float baseMoveSpeed;
         private MealboxPhysical carriedPreparedMealbox;
         private MealboxPhysical preparationMealbox;
+        private bool missingCharacterVisualReported;
 
         public event Action PreparationChanged;
         public event Action InventoryChanged;
@@ -99,7 +103,43 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             assignedRole = role;
+            EnsureCharacterVisual();
+            characterVisual?.SetRole(role);
             kifomePhone?.SetMousePointerEnabled(UsesMouseAndKeyboard);
+        }
+
+        public bool SetCharacterVisualLayer(int layer)
+        {
+            EnsureCharacterVisual();
+            if (characterVisual == null)
+                return false;
+
+            characterVisual.SetVisualLayer(layer);
+            return characterVisual.VisualLayer == layer;
+        }
+
+        public void ConfigureCameraVisualLayers(int ownVisualLayer, int otherVisualLayer)
+        {
+            if (playerCamera == null || ownVisualLayer < 0 || ownVisualLayer > 31 ||
+                otherVisualLayer < 0 || otherVisualLayer > 31)
+                return;
+
+            int mask = playerCamera.cullingMask;
+            mask &= ~(1 << ownVisualLayer);
+            mask |= 1 << otherVisualLayer;
+            playerCamera.cullingMask = mask;
+        }
+
+        private void EnsureCharacterVisual()
+        {
+            if (characterVisual == null)
+                characterVisual = GetComponent<PlayerCharacterVisual>();
+
+            if (characterVisual == null && !missingCharacterVisualReported)
+            {
+                Debug.LogError($"PlayerController '{name}' requires a PlayerCharacterVisual component for role models.", this);
+                missingCharacterVisualReported = true;
+            }
         }
 
         public bool WasRoleVoteTogglePressedThisFrame()
@@ -139,6 +179,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             characterController = GetComponent<CharacterController>();
             interactor = GetComponent<PlayerInteractor>() ?? GetComponentInChildren<PlayerInteractor>();
+            EnsureCharacterVisual();
 
             if (cameraPivot == null)
             {
@@ -201,6 +242,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             string inputControlScheme)
         {
             assignedRole = newRole;
+            EnsureCharacterVisual();
+            characterVisual?.SetRole(newRole);
             playerConfig = config;
             useMouseLook = mouseLook;
             playerActionMap = actionMapName;
@@ -391,11 +434,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
             {
                 velocity = Vector3.zero;
+                UpdateCharacterLocomotion(false);
                 return;
             }
 
             if (playerInput == null || playerInput.actions == null)
             {
+                UpdateCharacterLocomotion(false);
                 return;
             }
 
@@ -407,6 +452,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (kifomePhone != null && kifomePhone.IsOpen)
             {
+                UpdateCharacterLocomotion(false);
                 kifomePhone.HandlePlayerInput(
                     moveAction != null ? moveAction.ReadValue<Vector2>() : Vector2.zero,
                     confirmAction != null && confirmAction.triggered,
@@ -431,8 +477,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (playerInput == null || playerInput.actions == null)
             {
+                UpdateCharacterLocomotion(false);
                 return;
             }
+
+            Vector3 positionBeforeMovement = transform.position;
 
             Vector2 moveInput = moveAction != null ? moveAction.ReadValue<Vector2>() : Vector2.zero;
             Vector3 movement = new Vector3(moveInput.x, 0f, moveInput.y);
@@ -448,6 +497,20 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             velocity.y += gravity * Time.deltaTime;
             characterController.Move(velocity * Time.deltaTime);
+
+            Vector3 actualDisplacement = transform.position - positionBeforeMovement;
+            actualDisplacement.y = 0f;
+            UpdateCharacterLocomotion(actualDisplacement.sqrMagnitude > 0.000001f);
+        }
+
+        private void UpdateCharacterLocomotion(bool isMoving)
+        {
+            if (characterVisual != null)
+            {
+                characterVisual.SetLocomotion(
+                    isMoving,
+                    assignedRole == PlayerRole.Cook && mealboxCarryPoint.childCount != 0);
+            }
         }
 
         private void HandleLook()

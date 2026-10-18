@@ -90,7 +90,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (orderNumberText != null)
             {
-                orderNumberText.text = $"PEDIDO #{order.OrderId}";
+                orderNumberText.text = $"#{order.OrderId}";
             }
 
             if (orderNameText != null)
