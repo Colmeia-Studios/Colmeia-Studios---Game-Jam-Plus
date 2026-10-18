@@ -120,7 +120,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             foreach (IngredientUnlockRule rule in ingredientUnlocks)
             {
                 if (rule != null && rule.Ingredient != null &&
-                    string.Equals(rule.Ingredient.Id?.Trim(), ingredientId.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(IngredientStation.NormalizeLegacyId(rule.Ingredient.Id),
+                        IngredientStation.NormalizeLegacyId(ingredientId), StringComparison.OrdinalIgnoreCase) &&
                     rule.AvailableFromDay <= day)
                 {
                     return true;

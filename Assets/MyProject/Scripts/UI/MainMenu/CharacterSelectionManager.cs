@@ -321,7 +321,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 {
                     if (!firstCharacter.HasValue)
                     {
-                        card.playerLabel.text = "ESCOLHA";
+                        card.playerLabel.text = "Escolha";
                     }
                     else
                     {

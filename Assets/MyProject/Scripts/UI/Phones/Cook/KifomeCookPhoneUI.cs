@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using TMPro;
 using UnityEngine;
 
@@ -13,9 +14,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField] private Transform ordersContent;
         [SerializeField] private KifomeOrderCardUI orderCardPrefab;
         [SerializeField] private TMP_Text emptyOrdersText;
+        [SerializeField] private bool logOrderListDiagnostics;
 
-        private readonly List<KifomeOrderCardUI> orderCards = new List<KifomeOrderCardUI>();
+        private readonly Dictionary<string, KifomeOrderCardUI> orderCards =
+            new Dictionary<string, KifomeOrderCardUI>(StringComparer.OrdinalIgnoreCase);
         private readonly List<OrderRecord> visibleOrders = new List<OrderRecord>();
+        private string lastLoggedListState;
 
         protected override PlayerRole RequiredRole => PlayerRole.Cook;
 
@@ -75,7 +79,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 }
             }
 
-            ResizeCards(visibleOrders.Count);
+            ReconcileCards();
+            LogListStateIfChanged(activeOrders);
             if (emptyOrdersText != null)
             {
                 emptyOrdersText.gameObject.SetActive(visibleOrders.Count == 0);
@@ -92,7 +97,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                                   !Owner.HasActivePreparation ||
                                   order.State == OrderState.InPreparation && selected;
 
-                orderCards[i].BindForCook(
+                orderCards[order.OrderId].BindForCook(
                     order,
                     Orders,
                     Match,
@@ -106,11 +111,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         protected override void AddRoleButtonsToNavigation()
         {
-            for (int i = 0; i < orderCards.Count; i++)
+            for (int i = 0; i < visibleOrders.Count; i++)
             {
-                if (orderCards[i] != null)
+                if (orderCards.TryGetValue(visibleOrders[i].OrderId, out KifomeOrderCardUI card) && card != null)
                 {
-                    AddNavigableButton(orderCards[i].Button);
+                    AddNavigableButton(card.Button);
                 }
             }
         }
@@ -150,23 +155,66 @@ namespace ColmeiaStudios.SoMaisUmPedido
             RefreshRoleOrders();
         }
 
-        private void ResizeCards(int count)
+        private void ReconcileCards()
         {
-            while (orderCards.Count > count)
+            var desiredIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (OrderRecord order in visibleOrders)
+                desiredIds.Add(order.OrderId);
+
+            var removedIds = new List<string>();
+            foreach (KeyValuePair<string, KifomeOrderCardUI> entry in orderCards)
             {
-                int last = orderCards.Count - 1;
-                if (orderCards[last] != null)
+                if (!desiredIds.Contains(entry.Key))
+                    removedIds.Add(entry.Key);
+            }
+
+            foreach (string removedId in removedIds)
+            {
+                KifomeOrderCardUI card = orderCards[removedId];
+                if (card != null)
+                    Destroy(card.gameObject);
+                orderCards.Remove(removedId);
+            }
+
+            for (int i = 0; i < visibleOrders.Count; i++)
+            {
+                string orderId = visibleOrders[i].OrderId;
+                if (!orderCards.TryGetValue(orderId, out KifomeOrderCardUI card) || card == null)
                 {
-                    Destroy(orderCards[last].gameObject);
+                    card = Instantiate(orderCardPrefab, ordersContent);
+                    orderCards[orderId] = card;
                 }
 
-                orderCards.RemoveAt(last);
+                // Keep existing cards and their children; only reorder them when
+                // the active order sequence itself has changed.
+                if (card.transform.GetSiblingIndex() != i)
+                    card.transform.SetSiblingIndex(i);
             }
+        }
 
-            while (orderCards.Count < count)
+        private void LogListStateIfChanged(IReadOnlyList<OrderRecord> activeOrders)
+        {
+            if (!logOrderListDiagnostics)
+                return;
+
+            var signature = new StringBuilder();
+            signature.Append("visible[");
+            foreach (OrderRecord order in visibleOrders)
+                signature.Append(order.OrderId).Append(':').Append(order.State).Append(';');
+            signature.Append("] filtered[");
+            foreach (OrderRecord order in activeOrders)
             {
-                orderCards.Add(Instantiate(orderCardPrefab, ordersContent));
+                if (order.State != OrderState.Available && order.State != OrderState.InPreparation)
+                    signature.Append(order.OrderId).Append(':').Append(order.State).Append(';');
             }
+            signature.Append(']');
+
+            string currentState = signature.ToString();
+            if (string.Equals(lastLoggedListState, currentState, StringComparison.Ordinal))
+                return;
+
+            lastLoggedListState = currentState;
+            Debug.Log($"KifomeCookPhoneUI list reconciled: {currentState}", this);
         }
     }
 }

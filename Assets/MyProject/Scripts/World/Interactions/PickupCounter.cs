@@ -7,7 +7,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
     public sealed class PickupCounter : Interactable
     {
         [SerializeField] private OrderManager orderManager;
-        [SerializeField] private MealboxPhysical mealboxPrefab;
+        [SerializeField] private LunchboxPrefabCatalog prefabCatalog;
         [SerializeField] private Transform displayPoint;
 
         private readonly List<string> readyOrderIds = new List<string>();
@@ -30,8 +30,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (string.IsNullOrWhiteSpace(orderId) ||
                 !isActiveAndEnabled ||
                 !gameObject.activeInHierarchy ||
-                orderManager == null ||
-                mealboxPrefab == null)
+                orderManager == null)
             {
                 return false;
             }
@@ -57,12 +56,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 Debug.LogError("PickupCounter requires an OrderManager reference.", this);
             }
 
-            if (mealboxPrefab == null)
-            {
-                Debug.LogError(
-                    "PickupCounter requires a closed MealboxPhysical prefab to display completed orders.",
-                    this);
-            }
+            if (prefabCatalog == null)
+                Debug.LogError("PickupCounter requires a LunchboxPrefabCatalog with both closed mealbox prefabs.", this);
 
             if (displayPoint == null)
             {
@@ -167,59 +162,68 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryRegisterReadyOrder(string orderId)
         {
-            if (string.IsNullOrWhiteSpace(orderId) || orderManager == null ||
+            Debug.LogError($"PickupCounter cannot register order '{orderId}' without the Cook's physical mealbox. Use TryRegisterReadyOrder(orderId, mealbox).", this);
+            return false;
+        }
+
+        public bool TryRegisterReadyOrder(string orderId, MealboxPhysical mealbox)
+        {
+            if (mealbox == null || string.IsNullOrWhiteSpace(orderId) || orderManager == null ||
                 !CanRegisterReadyOrder(orderId) ||
                 !orderManager.TryGetOrder(orderId, out OrderRecord order) ||
-                order.State != OrderState.ReadyForPickup)
-            {
+                order.State != OrderState.ReadyForPickup || !mealbox.IsClosed ||
+                !string.Equals(mealbox.OrderId, order.OrderId, StringComparison.OrdinalIgnoreCase) ||
+                mealbox.Type != order.LunchboxType || readyMealboxes.ContainsValue(mealbox))
                 return false;
-            }
 
             string normalizedOrderId = orderId.Trim();
             Transform spawnTransform = displayPoint != null ? displayPoint : transform;
-            Vector3 spawnPosition = displayPoint != null
-                ? displayPoint.position
-                : transform.position + Vector3.up * 1.1f;
-            MealboxPhysical mealbox = Instantiate(
-                mealboxPrefab, spawnPosition, spawnTransform.rotation, spawnTransform);
-            if (mealbox == null)
-            {
-                Debug.LogError($"Could not create the mealbox for order '{normalizedOrderId}'.", this);
-                return false;
-            }
-
-            mealbox.Configure(normalizedOrderId, order.DisplayName);
+            mealbox.transform.SetParent(spawnTransform, true);
+            mealbox.SetAttachedToPlayer(false);
             readyOrderIds.Add(normalizedOrderId);
             queuedOrderIds.Add(normalizedOrderId);
-            readyMealboxes[normalizedOrderId] = mealbox;
+            readyMealboxes.Add(normalizedOrderId, mealbox);
             RefreshDisplayPositions();
             return true;
         }
 
-        public bool CanCreateCookCarriedMealbox(string orderId, PlayerController cook)
-        {
-            return !string.IsNullOrWhiteSpace(orderId) && cook != null &&
-                   cook.AssignedRole == PlayerRole.Cook && cook.CanCarryPreparedMealbox &&
-                   isActiveAndEnabled && gameObject.activeInHierarchy && orderManager != null &&
-                   mealboxPrefab != null && orderManager.TryGetOrder(orderId, out OrderRecord order) &&
-                   order.State == OrderState.InPreparation;
-        }
-
-        public bool TryCreateCookCarriedMealbox(
+        public bool TryCreateClosedMealboxForCompletion(
             string orderId,
             PlayerController cook,
             out MealboxPhysical mealbox)
         {
             mealbox = null;
-            if (!CanCreateCookCarriedMealbox(orderId, cook) ||
-                !orderManager.TryGetOrder(orderId, out OrderRecord order))
+            if (cook == null || cook.AssignedRole != PlayerRole.Cook || !cook.CanCarryPreparedMealbox ||
+                cook.PreparationMealbox == null || cook.PreparationMealbox.IsClosed ||
+                !string.Equals(cook.PreparationMealbox.OrderId, orderId, StringComparison.OrdinalIgnoreCase) ||
+                !isActiveAndEnabled || !gameObject.activeInHierarchy ||
+                prefabCatalog == null || orderManager == null ||
+                !orderManager.TryGetOrder(orderId, out OrderRecord order) ||
+                order.State != OrderState.InPreparation || cook.PreparationMealbox.Type != order.LunchboxType)
                 return false;
 
-            mealbox = Instantiate(mealboxPrefab, cook.GetMealboxCarryPoint());
+            if (!prefabCatalog.HasCompleteConfiguration)
+            {
+                Debug.LogError($"LunchboxPrefabCatalog '{prefabCatalog.name}' must have all five empty and both closed prefabs assigned.", prefabCatalog);
+                return false;
+            }
+
+            GameObject closedPrefab = prefabCatalog.ChooseClosedPrefab();
+            if (closedPrefab == null)
+            {
+                Debug.LogError($"LunchboxPrefabCatalog '{prefabCatalog.name}' has no closed mealbox prefab assigned.", prefabCatalog);
+                return false;
+            }
+
+            GameObject instance = Instantiate(closedPrefab);
+            if (instance == null) return false;
+            mealbox = instance.GetComponent<MealboxPhysical>();
             if (mealbox == null)
-                return false;
-
-            mealbox.Configure(order.OrderId, order.DisplayName);
+            {
+                mealbox = instance.AddComponent<MealboxPhysical>();
+                Debug.LogWarning($"Closed prefab '{closedPrefab.name}' had no MealboxPhysical; added the component to its instance.", closedPrefab);
+            }
+            mealbox.ConfigureClosedForOrder(order.OrderId, order.DisplayName, order.LunchboxType);
             return true;
         }
 
@@ -229,7 +233,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             MealboxPhysical mealbox = cook != null ? cook.CarriedPreparedMealbox : null;
             if (cook == null || cook.AssignedRole != PlayerRole.Cook || mealbox == null ||
                 orderManager == null || !orderManager.TryGetOrder(mealbox.OrderId, out OrderRecord order) ||
-                order.State != OrderState.ReadyForCookPickup || !CanRegisterReadyOrder(mealbox.OrderId))
+                order.State != OrderState.ReadyForCookPickup || !mealbox.IsClosed ||
+                mealbox.Type != order.LunchboxType || !CanRegisterReadyOrder(mealbox.OrderId))
             {
                 result = "A marmita do Cook ou a vaga do balcão está indisponível.";
                 return false;
@@ -241,16 +246,43 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
-            cook.ReleasePreparedMealbox();
-            Transform spawnTransform = displayPoint != null ? displayPoint : transform;
-            mealbox.transform.SetParent(spawnTransform, true);
-            readyOrderIds.Add(order.OrderId);
-            queuedOrderIds.Add(order.OrderId);
-            readyMealboxes[order.OrderId] = mealbox;
-            RefreshDisplayPositions();
+            if (!TryRegisterReadyOrder(order.OrderId, mealbox))
+            {
+                orderManager.TryRollbackDepositForPickup(order.OrderId);
+                result = "O balcão não conseguiu registrar a marmita; ela continua com o Cook.";
+                return false;
+            }
+
+            if (cook.ReleasePreparedMealbox(false) != mealbox)
+            {
+                UnregisterReadyOrderKeepMealbox(order.OrderId);
+                orderManager.TryRollbackDepositForPickup(order.OrderId);
+                mealbox.transform.SetParent(cook.GetMealboxCarryPoint(), false);
+                mealbox.SetAttachedToPlayer(true);
+                result = "A transferência da marmita falhou; tente novamente.";
+                return false;
+            }
+
             orderManager.NotifyOrdersChanged();
+            cook.TryCompletePendingPreparation();
             result = $"Pedido #{order.OrderId} depositado. O Delivery pode retirá-lo.";
             return true;
+        }
+
+        public bool TryRestoreReadyOrder(string orderId, MealboxPhysical mealbox)
+        {
+            return orderManager != null && orderManager.TryGetOrder(orderId, out OrderRecord order) &&
+                   order.State == OrderState.ReadyForPickup && TryRegisterReadyOrder(orderId, mealbox);
+        }
+
+        private void UnregisterReadyOrderKeepMealbox(string orderId)
+        {
+            if (string.IsNullOrWhiteSpace(orderId)) return;
+            string id = orderId.Trim();
+            readyMealboxes.Remove(id);
+            queuedOrderIds.Remove(id);
+            readyOrderIds.Remove(id);
+            RefreshDisplayPositions();
         }
 
         public bool TryGetReadyMealbox(string orderId, out MealboxPhysical mealbox)
@@ -265,6 +297,16 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (!readyMealboxes.TryGetValue(normalizedOrderId, out mealbox) || mealbox == null ||
                 !queuedOrderIds.Contains(normalizedOrderId))
             {
+                mealbox = null;
+                return false;
+            }
+
+            if (orderManager == null || !orderManager.TryGetOrder(normalizedOrderId, out OrderRecord order) ||
+                order.State != OrderState.ReadyForPickup || !mealbox.IsClosed ||
+                !string.Equals(mealbox.OrderId, normalizedOrderId, StringComparison.OrdinalIgnoreCase) ||
+                mealbox.Type != order.LunchboxType)
+            {
+                RemoveReadyOrder(normalizedOrderId);
                 mealbox = null;
                 return false;
             }
@@ -330,7 +372,15 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return;
             }
 
-            int index = readyOrderIds.IndexOf(orderId.Trim());
+            int index = -1;
+            for (int i = 0; i < readyOrderIds.Count; i++)
+            {
+                if (string.Equals(readyOrderIds[i], orderId.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    index = i;
+                    break;
+                }
+            }
             if (index >= 0)
             {
                 RemoveQueuedOrderAt(index, destroyMealbox);

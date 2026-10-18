@@ -33,6 +33,8 @@ MonoBehaviour:
   - ingredient: {fileID: 11400000, guid: e2b278f6618ee79219d60aea1dd394a8, type: 2}
     availableFromDay: 1
   lunchboxUnlocks:
+  - lunchboxType: 4
+    availableFromDay: 1
   - lunchboxType: 0
     availableFromDay: 1
   - lunchboxType: 1

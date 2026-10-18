@@ -10,12 +10,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField, Min(0f)] private float value;
         [SerializeField] private Color color = Color.white;
         [SerializeField] private Sprite icon;
+        [SerializeField] private GameObject visualPrefab;
 
         public string Id => id;
         public string DisplayName => displayName;
         public float Value => value;
         public Color Color => color;
         public Sprite Icon => icon;
+        public GameObject VisualPrefab => visualPrefab;
 
         private void OnValidate()
         {

@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14d0a5564d8e41e9b41aec26c519f123, type: 3}
+  m_Name: LunchboxPrefabCatalog
+  m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.LunchboxPrefabCatalog
+  emptyOneCompartment: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
+  emptyTwoCompartments: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
+  emptyThreeCompartments: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
+  emptyFourCompartments: {fileID: 6251274948289739706, guid: bdeac594b92179f138ef1472de60df27, type: 3}
+  emptyFiveCompartments: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
+  closedMealboxA: {fileID: 5118906551980224946, guid: c18c911dc802b0740866da60d467b22d, type: 3}
+  closedMealboxB: {fileID: 2921154933895940338, guid: 4234bb29d84dca3a0a229a84fedd53ea, type: 3}

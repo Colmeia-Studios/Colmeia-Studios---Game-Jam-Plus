@@ -196,7 +196,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (cycleState == MatchCycleState.Transitioning)
             {
                 float transitionDuration = matchConfig != null ? matchConfig.NextDayTransitionSeconds : 5f;
-                transitionElapsed += Time.deltaTime;
+                transitionElapsed += GetGameplayClockDeltaTime();
                 if (transitionElapsed >= transitionDuration)
                 {
                     BeginNextDay();
@@ -210,7 +210,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return;
             }
 
-            elapsedSeconds = Mathf.Min(DayDurationSeconds, elapsedSeconds + Time.deltaTime);
+            elapsedSeconds = Mathf.Min(DayDurationSeconds, elapsedSeconds + GetGameplayClockDeltaTime());
             if (elapsedSeconds >= DayDurationSeconds)
             {
                 elapsedSeconds = DayDurationSeconds;
@@ -222,6 +222,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 nextClockNotification = elapsedSeconds + 1f;
                 ClockChanged?.Invoke();
             }
+        }
+
+        // MatchConfig times are specified in real seconds. Ignore accelerated or
+        // slowed Unity time scales, while still pausing the match at timeScale 0.
+        private static float GetGameplayClockDeltaTime()
+        {
+            return Time.timeScale > 0f ? Time.unscaledDeltaTime : 0f;
         }
 
         private void BeginDay()
@@ -528,11 +535,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (!player.TryAddOrderToInventory(orderId) || !orderManager.TryMarkPickedUp(orderId))
             {
                 player.RemoveOrderFromInventory(orderId);
-                sharedPickupCounter.TryRegisterReadyOrder(orderId);
-                if (mealbox != null)
-                {
+                if (!sharedPickupCounter.TryRestoreReadyOrder(orderId, mealbox) && mealbox != null)
                     Destroy(mealbox.gameObject);
-                }
 
                 return false;
             }
@@ -600,47 +604,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return true;
         }
 
-        public bool IsUpgradePurchased(UpgradeData upgrade)
-        {
-            return upgrade != null &&
-                   !string.IsNullOrWhiteSpace(upgrade.Id) &&
-                   purchasedUpgradeIds.Contains(GetUpgradePurchaseKey(upgrade));
-        }
-
-        public bool CanPurchaseUpgrade(PlayerController buyer, UpgradeData upgrade)
-        {
-            return buyer != null &&
-                   upgrade != null &&
-                   buyer.AssignedRole == upgrade.Role &&
-                   !string.IsNullOrWhiteSpace(upgrade.Id) &&
-                   buyer.CanApplyUpgrade(upgrade) &&
-                   !IsUpgradePurchased(upgrade) &&
-                   balance >= upgrade.Price &&
-                   !float.IsNaN(upgrade.Price) &&
-                   !float.IsInfinity(upgrade.Price) &&
-                   upgrade.Price >= 0f;
-        }
-
-        public bool TryPurchaseUpgrade(PlayerController buyer, UpgradeData upgrade)
-        {
-            if (!CanPurchaseUpgrade(buyer, upgrade) || !buyer.CanApplyUpgrade(upgrade))
-            {
-                return false;
-            }
-
-            float updatedBalance = balance - upgrade.Price;
-            if (updatedBalance < 0f || float.IsNaN(updatedBalance) || float.IsInfinity(updatedBalance) ||
-                !buyer.TryApplyUpgrade(upgrade))
-            {
-                return false;
-            }
-
-            purchasedUpgradeIds.Add(GetUpgradePurchaseKey(upgrade));
-            balance = updatedBalance;
-            MatchStateChanged?.Invoke();
-            return true;
-        }
-
         public void SetReputation(int stars)
         {
             int clamped = Mathf.Clamp(stars, 0, 5);
@@ -683,9 +646,5 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return deliverySpawn;
         }
 
-        private static string GetUpgradePurchaseKey(UpgradeData upgrade)
-        {
-            return $"{upgrade.Role}:{upgrade.Id.Trim()}";
-        }
     }
 }

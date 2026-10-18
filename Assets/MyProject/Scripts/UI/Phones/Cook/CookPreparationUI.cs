@@ -11,11 +11,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField] private Transform ingredientContent;
         [SerializeField] private KifomeOrderListUI ingredientIndicatorPrefab;
         [SerializeField] private TMP_Text recipeNameText;
-        [SerializeField] private TMP_Text preparationStatusText;
-        [SerializeField] private Renderer preparationMealboxRenderer;
-        [SerializeField] private Color incompleteColor = new Color(0.75f, 0.35f, 0.18f);
-        [SerializeField] private Color completeColor = new Color(0.22f, 0.62f, 0.3f);
-
+        
         private readonly List<KifomeOrderListUI> indicators = new List<KifomeOrderListUI>();
         private string renderedOrderId;
         private GameManager gameManager;
@@ -63,18 +59,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 initialized = false;
                 ClearIndicators();
                 return;
-            }
-
-            if (preparationStatusText == null)
-            {
-                Debug.LogWarning(
-                    "CookPreparationUI has no preparationStatusText. Recipe name and status will share recipeNameText; assign a separate TMP_Text to show them independently.",
-                    this);
-            }
-
-            if (preparationMealboxRenderer == null)
-            {
-                Debug.LogWarning("CookPreparationUI has no preparationMealboxRenderer; mealbox progress color will not be shown.", this);
             }
 
             Camera cookCamera = cookPlayer.GetCamera();
@@ -133,10 +117,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 string status = carryingMealbox
                     ? "Marmita pronta — leve ao balcão."
                     : string.IsNullOrWhiteSpace(cookPlayer.PreparationMessage)
-                        ? "Select an Order."
+                        ? "Selecione um pedido no telefone para começar."
                         : cookPlayer.PreparationMessage;
                 SetRecipeAndStatus(string.Empty, status);
-                SetMealboxColor(carryingMealbox ? completeColor : incompleteColor);
                 return;
             }
 
@@ -146,8 +129,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 SetIngredientsVisible(false);
                 SetRecipeAndStatus(order.DisplayName,
                     $"A preparação do pedido #{order.OrderId} continua. O conteúdo foi preservado.");
-                SetMealboxColor(incompleteColor);
-                return;
+               return;
             }
 
             SetIngredientsVisible(true);
@@ -162,8 +144,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 if (!string.IsNullOrWhiteSpace(actualId))
                 {
-                    actualCounts.TryGetValue(actualId.Trim(), out int count);
-                    actualCounts[actualId.Trim()] = count + 1;
+                    string normalizedActualId = IngredientStation.NormalizeLegacyId(actualId);
+                    actualCounts.TryGetValue(normalizedActualId, out int count);
+                    actualCounts[normalizedActualId] = count + 1;
                 }
             }
 
@@ -172,9 +155,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
             for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
             {
                 string requiredId = order.RequiredIngredientIds[i];
-                requiredCounts.TryGetValue(requiredId, out int occurrence);
-                requiredCounts[requiredId] = occurrence + 1;
-                actualCounts.TryGetValue(requiredId, out int actualCount);
+                string normalizedRequiredId = IngredientStation.NormalizeLegacyId(requiredId);
+                requiredCounts.TryGetValue(normalizedRequiredId, out int occurrence);
+                requiredCounts[normalizedRequiredId] = occurrence + 1;
+                actualCounts.TryGetValue(normalizedRequiredId, out int actualCount);
                 bool placed = actualCount > occurrence;
                 IngredientData ingredient = i < order.RequiredIngredients.Count
                     ? order.RequiredIngredients[i]
@@ -189,14 +173,36 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 exactContents &= actual.Value == requiredCount;
             }
 
-            bool correctLunchbox = cookPlayer.SelectedLunchboxType == order.LunchboxType;
-            bool preparationComplete = exactContents && correctLunchbox;
-            SetMealboxColor(preparationComplete ? completeColor : incompleteColor);
+            MealboxPhysical physicalMealbox = cookPlayer.PreparationMealbox;
+            bool correctLunchbox = physicalMealbox != null && !physicalMealbox.IsClosed &&
+                                   physicalMealbox.Type == order.LunchboxType &&
+                                   cookPlayer.SelectedLunchboxType == order.LunchboxType;
+            bool carryingOtherMealbox = cookPlayer.CarriedPreparedMealbox != null;
+            bool preparationComplete = exactContents && correctLunchbox && !carryingOtherMealbox;
+            string completionError = cookPlayer.PreparationMessage;
+            if (string.IsNullOrWhiteSpace(completionError) ||
+                !completionError.StartsWith("Não foi possível", StringComparison.OrdinalIgnoreCase))
+                completionError = null;
             SetRecipeAndStatus(order.DisplayName, preparationComplete
-                ? "Receita correta — concluindo a marmita."
+                ? completionError ?? "Receita correta — concluindo a marmita."
+                : correctLunchbox && exactContents && carryingOtherMealbox
+                    ? "Receita pronta. Deposite primeiro a marmita que está carregando."
                 : !correctLunchbox
-                    ? $"Selecione a marmita correta para o pedido #{order.OrderId}."
+                    ? $"Pegue na estação a marmita de {GetCompartmentCount(order.LunchboxType)} compartimento(s) do pedido #{order.OrderId}."
                     : $"Preparação do pedido #{order.OrderId}: ingredientes pendentes ou extras.");
+        }
+
+        private static int GetCompartmentCount(LunchboxType type)
+        {
+            switch (type)
+            {
+                case LunchboxType.OneCompartment: return 1;
+                case LunchboxType.TwoCompartments: return 2;
+                case LunchboxType.ThreeCompartments: return 3;
+                case LunchboxType.FourCompartments: return 4;
+                case LunchboxType.FiveCompartments: return 5;
+                default: return 0;
+            }
         }
 
         private void RebuildIndicators(OrderRecord order)
@@ -225,10 +231,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void SetRecipeAndStatus(string recipeName, string status)
         {
-            if (preparationStatusText != null)
+            if (recipeNameText != null)
             {
                 recipeNameText.text = recipeName;
-                preparationStatusText.text = status;
             }
             else
             {
@@ -237,12 +242,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     : $"{recipeName}\n{status}";
             }
         }
-
-        private void SetMealboxColor(Color color)
-        {
-            if (preparationMealboxRenderer != null)
-                preparationMealboxRenderer.material.color = color;
-        }
+        
 
         private void SetIngredientsVisible(bool visible)
         {

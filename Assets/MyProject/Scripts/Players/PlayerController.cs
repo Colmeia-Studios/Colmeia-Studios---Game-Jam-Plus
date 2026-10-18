@@ -27,6 +27,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField] private Transform cameraPivot;
 
         [Header("Cook transport")] [SerializeField] private Transform mealboxCarryPoint;
+        [SerializeField] private Transform mealboxPreparationPoint;
 
         private CharacterController characterController;
         private PlayerInteractor interactor;
@@ -49,12 +50,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private bool completingPreparation;
         private readonly List<string> carriedOrderIds = new List<string>(3);
         private readonly HashSet<string> purchasedUpgradeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly List<UpgradeData> appliedUpgrades = new List<UpgradeData>();
         private string selectedDeliveryOrderId;
         private string selectedPickupOrderId;
         private string gameplayMessage;
         private float baseMoveSpeed;
         private MealboxPhysical carriedPreparedMealbox;
+        private MealboxPhysical preparationMealbox;
 
         public event Action PreparationChanged;
         public event Action InventoryChanged;
@@ -87,6 +88,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public IReadOnlyList<string> CurrentIngredientIds => currentIngredients;
         public IReadOnlyList<IngredientData> CurrentIngredientData => currentIngredientData;
         public MealboxPhysical CarriedPreparedMealbox => carriedPreparedMealbox;
+        public MealboxPhysical PreparationMealbox => preparationMealbox;
 
         private void Awake()
         {
@@ -201,7 +203,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             baseMoveSpeed = moveSpeed;
-            RecalculateMovementSpeed();
 
             if (playerCamera != null)
             {
@@ -425,10 +426,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return playerCamera;
         }
 
-        public bool TryAddIngredient(string ingredientId, string displayName)
+        public bool TryAddIngredient(string ingredientId, string displayName, GameObject visualPrefab = null)
         {
-            if (!HasActivePreparation || string.IsNullOrWhiteSpace(ingredientId) || completingPreparation)
+            if (!HasActivePreparation || preparationMealbox == null ||
+                preparationMealbox.IsClosed || preparationMealbox.Type != selectedLunchboxType ||
+                string.IsNullOrWhiteSpace(ingredientId) || completingPreparation)
             {
+                if (HasActivePreparation && preparationMealbox == null)
+                    ShowGameplayMessage("Pegue a marmita correta na estação antes de adicionar ingredientes.");
                 return false;
             }
 
@@ -438,7 +443,27 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
-            currentIngredients.Add(ingredientId.Trim());
+            string normalizedId = IngredientStation.NormalizeLegacyId(ingredientId);
+            if (HasIngredient(normalizedId))
+            {
+                ShowGameplayMessage($"{displayName} já foi adicionado a esta receita.");
+                return false;
+            }
+
+            if (!TryGetRequiredIngredientSlot(normalizedId, out int visualSlot))
+            {
+                ShowGameplayMessage($"{displayName} não faz parte da receita selecionada.");
+                return false;
+            }
+
+            if (preparationMealbox != null && visualPrefab != null &&
+                !preparationMealbox.TryAddIngredientVisual(visualPrefab, visualSlot))
+            {
+                ShowGameplayMessage("Não foi possível posicionar o modelo do ingrediente na marmita. Confira os pontos dos compartimentos.");
+                return false;
+            }
+
+            currentIngredients.Add(normalizedId);
             currentIngredientData.Add(null);
             preparationMessage = $"Adicionado: {displayName}.";
             PreparationChanged?.Invoke();
@@ -449,8 +474,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryAddIngredient(IngredientData ingredient)
         {
-            if (ingredient == null || !HasActivePreparation || completingPreparation)
+            if (ingredient == null || !HasActivePreparation || preparationMealbox == null ||
+                preparationMealbox.IsClosed || preparationMealbox.Type != selectedLunchboxType || completingPreparation)
             {
+                if (HasActivePreparation && preparationMealbox == null)
+                    ShowGameplayMessage("Pegue a marmita correta na estação antes de adicionar ingredientes.");
                 return false;
             }
 
@@ -460,7 +488,27 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
-            currentIngredients.Add(ingredient.Id);
+            string normalizedId = IngredientStation.NormalizeLegacyId(ingredient.Id);
+            if (HasIngredient(normalizedId))
+            {
+                ShowGameplayMessage($"{ingredient.DisplayName} já foi adicionado a esta receita.");
+                return false;
+            }
+
+            if (!TryGetRequiredIngredientSlot(normalizedId, out int visualSlot))
+            {
+                ShowGameplayMessage($"{ingredient.DisplayName} não faz parte da receita selecionada.");
+                return false;
+            }
+
+            if (preparationMealbox != null && ingredient.VisualPrefab != null &&
+                !preparationMealbox.TryAddIngredientVisual(ingredient, visualSlot))
+            {
+                ShowGameplayMessage("Não foi possível posicionar o modelo do ingrediente na marmita. Confira os pontos dos compartimentos.");
+                return false;
+            }
+
+            currentIngredients.Add(normalizedId);
             currentIngredientData.Add(ingredient);
             preparationMessage = $"Adicionado: {ingredient.DisplayName}.";
             PreparationChanged?.Invoke();
@@ -488,6 +536,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             currentIngredients.Clear();
             currentIngredientData.Clear();
+            if (preparationMealbox != null)
+                preparationMealbox.ClearPreparationVisuals();
             PreparationChanged?.Invoke();
         }
 
@@ -519,7 +569,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             preparationStartedAt = GameManager.Instance.ElapsedSeconds;
             selectedLunchboxType = order.LunchboxType;
             ClearIngredients();
-            preparationMessage = $"Preparando pedido #{order.OrderId}.";
+            preparationMessage = $"Pedido #{order.OrderId}: pegue a marmita de {GetCompartmentCount(order.LunchboxType)} compartimento(s) na estação.";
             selectedLunchboxType = order.LunchboxType;
             PreparationChanged?.Invoke();
             return true;
@@ -541,7 +591,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             preparationStartedAt = GameManager.Instance.ElapsedSeconds;
             selectedLunchboxType = order.LunchboxType;
             ClearIngredients();
-            preparationMessage = $"Preparando pedido #{order.OrderId}.";
+            preparationMessage = $"Pedido #{order.OrderId}: pegue a marmita de {GetCompartmentCount(order.LunchboxType)} compartimento(s) na estação.";
             PreparationChanged?.Invoke();
             return true;
         }
@@ -573,6 +623,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             preparationMessage = result;
+            preparationMealbox = null;
             ShowGameplayMessage(result);
             selectedOrderId = null;
             preparationPresentationVisible = true;
@@ -590,7 +641,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryCarryPreparedMealbox(MealboxPhysical mealbox)
         {
-            if (!CanCarryPreparedMealbox || mealbox == null)
+            if (!CanCarryPreparedMealbox || mealbox == null || !mealbox.IsClosed)
                 return false;
 
             carriedPreparedMealbox = mealbox;
@@ -598,17 +649,71 @@ namespace ColmeiaStudios.SoMaisUmPedido
             mealbox.transform.SetParent(carryPoint, false);
             mealbox.transform.localPosition = mealboxCarryPoint != null ? Vector3.zero : new Vector3(0f, 1f, 0.55f);
             mealbox.transform.localRotation = Quaternion.identity;
+            mealbox.SetAttachedToPlayer(true);
             PreparationChanged?.Invoke();
             return true;
         }
 
-        public MealboxPhysical ReleasePreparedMealbox()
+        public MealboxPhysical ReleasePreparedMealbox(bool tryCompletePreparation = true)
         {
             MealboxPhysical mealbox = carriedPreparedMealbox;
             carriedPreparedMealbox = null;
+            if (mealbox != null) mealbox.SetAttachedToPlayer(false);
             preparationMessage = "Marmita depositada no balcão.";
             PreparationChanged?.Invoke();
+            if (tryCompletePreparation) TryCompletePendingPreparation();
             return mealbox;
+        }
+
+        public bool TryTakeEmptyMealbox(MealboxPhysical mealbox, OrderRecord order, out string result)
+        {
+            result = "Não foi possível pegar esta marmita.";
+            if (assignedRole != PlayerRole.Cook || mealbox == null || order == null || !HasActivePreparation ||
+                preparationMealbox != null ||
+                !string.Equals(order.OrderId, selectedOrderId, StringComparison.OrdinalIgnoreCase) ||
+                order.State != OrderState.InPreparation || order.LunchboxType != selectedLunchboxType ||
+                mealbox.IsClosed || mealbox.Type != order.LunchboxType ||
+                !string.Equals(mealbox.OrderId, order.OrderId, StringComparison.OrdinalIgnoreCase) ||
+                GameManager.Instance == null || GameManager.Instance.MatchConfiguration == null ||
+                !GameManager.Instance.MatchConfiguration.IsLunchboxUnlocked(
+                    mealbox.Type, Mathf.Max(1, GameManager.Instance.CurrentDay)))
+                return false;
+
+            preparationMealbox = mealbox;
+            Transform point = mealboxPreparationPoint != null ? mealboxPreparationPoint : transform;
+            mealbox.transform.SetParent(point, false);
+            mealbox.transform.localPosition = mealboxPreparationPoint != null ? Vector3.zero : new Vector3(0f, 0.9f, 0.45f);
+            mealbox.transform.localRotation = Quaternion.identity;
+            mealbox.SetAttachedToPlayer(true);
+            preparationMessage = $"Marmita correta selecionada para o pedido #{order.OrderId}.";
+            PreparationChanged?.Invoke();
+            result = preparationMessage;
+            return true;
+        }
+
+        public bool ReplacePreparationWithClosedMealbox(MealboxPhysical closedMealbox, string orderId, LunchboxType type)
+        {
+            MealboxPhysical emptyMealbox = preparationMealbox;
+            if (assignedRole != PlayerRole.Cook || !CanCarryPreparedMealbox || emptyMealbox == null ||
+                closedMealbox == null || !closedMealbox.IsClosed || !HasActivePreparation ||
+                !string.Equals(selectedOrderId, orderId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(closedMealbox.OrderId, orderId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(emptyMealbox.OrderId, orderId, StringComparison.OrdinalIgnoreCase) ||
+                emptyMealbox.Type != type || closedMealbox.Type != type)
+                return false;
+
+            if (!TryCarryPreparedMealbox(closedMealbox)) return false;
+            preparationMealbox = null;
+            emptyMealbox.gameObject.SetActive(false);
+            Destroy(emptyMealbox.gameObject);
+            preparationMessage = $"Pedido #{orderId} pronto. Leve a marmita fechada até o balcão.";
+            PreparationChanged?.Invoke();
+            return true;
+        }
+
+        public void TryCompletePendingPreparation()
+        {
+            TryCompletePreparationIfExact();
         }
 
         public void RemovePreparedMealbox(string orderId)
@@ -641,6 +746,48 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
         }
 
+        private bool HasIngredient(string normalizedId)
+        {
+            for (int i = 0; i < currentIngredients.Count; i++)
+            {
+                if (string.Equals(currentIngredients[i], normalizedId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool TryGetRequiredIngredientSlot(string normalizedId, out int slot)
+        {
+            slot = -1;
+            if (GameManager.Instance == null || string.IsNullOrWhiteSpace(selectedOrderId) ||
+                !GameManager.Instance.TryGetOrder(selectedOrderId, out OrderRecord order))
+                return false;
+
+            for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
+            {
+                if (string.Equals(IngredientStation.NormalizeLegacyId(order.RequiredIngredientIds[i]),
+                    normalizedId, StringComparison.OrdinalIgnoreCase))
+                {
+                    slot = i;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static int GetCompartmentCount(LunchboxType type)
+        {
+            switch (type)
+            {
+                case LunchboxType.OneCompartment: return 1;
+                case LunchboxType.TwoCompartments: return 2;
+                case LunchboxType.ThreeCompartments: return 3;
+                case LunchboxType.FourCompartments: return 4;
+                case LunchboxType.FiveCompartments: return 5;
+                default: return 0;
+            }
+        }
+
         private static bool IngredientsMatch(IReadOnlyList<string> required, IReadOnlyList<string> added)
         {
             if (required == null || added == null || required.Count != added.Count)
@@ -656,7 +803,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     return false;
                 }
 
-                string normalizedId = id.Trim();
+                string normalizedId = IngredientStation.NormalizeLegacyId(id);
                 remaining.TryGetValue(normalizedId, out int count);
                 remaining[normalizedId] = count + 1;
             }
@@ -668,7 +815,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     return false;
                 }
 
-                string normalizedId = id.Trim();
+                string normalizedId = IngredientStation.NormalizeLegacyId(id);
                 if (!remaining.TryGetValue(normalizedId, out int count) || count == 0)
                 {
                     return false;
@@ -697,6 +844,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             selectedOrderId = null;
+            if (preparationMealbox != null)
+                Destroy(preparationMealbox.gameObject);
+            preparationMealbox = null;
             ClearIngredients();
             preparationMessage = "Preparação cancelada; o pedido voltou à lista.";
             PreparationChanged?.Invoke();
@@ -704,6 +854,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public void SelectLunchboxType(LunchboxType type)
         {
+            if (HasActivePreparation && type != selectedLunchboxType)
+            {
+                ShowGameplayMessage("O tipo de marmita é definido pelo pedido selecionado e não pode ser trocado durante a preparação.");
+                return;
+            }
+
             if (GameManager.Instance != null && !GameManager.Instance.IsLunchboxUnlocked(type))
             {
                 ShowGameplayMessage("Esse tipo de marmita ainda está bloqueado.");
@@ -842,48 +998,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
             GameplayMessageChanged?.Invoke();
         }
 
-        public bool CanApplyUpgrade(UpgradeData upgrade)
-        {
-            return upgrade != null && upgrade.Role == assignedRole &&
-                   !string.IsNullOrWhiteSpace(upgrade.Id) &&
-                   !purchasedUpgradeIds.Contains(upgrade.Id.Trim()) &&
-                   upgrade.MovementSpeedMultiplier >= 1f &&
-                   !float.IsNaN(upgrade.MovementSpeedMultiplier) &&
-                   !float.IsInfinity(upgrade.MovementSpeedMultiplier);
-        }
-
-        public bool TryApplyUpgrade(UpgradeData upgrade)
-        {
-            if (!CanApplyUpgrade(upgrade))
-            {
-                return false;
-            }
-
-            purchasedUpgradeIds.Add(upgrade.Id.Trim());
-            appliedUpgrades.Add(upgrade);
-            RecalculateMovementSpeed();
-            return true;
-        }
-
         private bool ContainsOrderId(string orderId)
         {
             string normalizedId = orderId.Trim();
             return carriedOrderIds.Exists(existingId =>
                 string.Equals(existingId, normalizedId, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private void RecalculateMovementSpeed()
-        {
-            float multiplier = 1f;
-            foreach (UpgradeData upgrade in appliedUpgrades)
-            {
-                if (upgrade != null)
-                {
-                    multiplier *= upgrade.MovementSpeedMultiplier;
-                }
-            }
-
-            moveSpeed = baseMoveSpeed * multiplier;
         }
 
         private void OnOrdersChanged()
@@ -904,6 +1023,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 string expiredPreparationId = selectedOrderId;
                 selectedOrderId = null;
+                if (preparationMealbox != null)
+                {
+                    if (preparationMealbox == carriedPreparedMealbox)
+                        preparationMealbox = null;
+                    else
+                        Destroy(preparationMealbox.gameObject);
+                }
+                preparationMealbox = null;
                 ClearIngredients();
                 preparationMessage = $"A preparação do pedido #{expiredPreparationId} não está mais ativa.";
                 ShowGameplayMessage(preparationMessage);
@@ -958,6 +1085,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             selectedOrderId = null;
+            if (preparationMealbox != null)
+                Destroy(preparationMealbox.gameObject);
+            preparationMealbox = null;
             selectedPickupOrderId = null;
             selectedDeliveryOrderId = null;
             carriedOrderIds.Clear();
@@ -993,11 +1123,23 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (pairedKeyboard.digit1Key.wasPressedThisFrame)
             {
-                SelectLunchboxType(LunchboxType.ThreeCompartments);
+                SelectLunchboxType(LunchboxType.OneCompartment);
             }
             else if (pairedKeyboard.digit2Key.wasPressedThisFrame)
             {
+                SelectLunchboxType(LunchboxType.TwoCompartments);
+            }
+            else if (pairedKeyboard.digit3Key.wasPressedThisFrame)
+            {
+                SelectLunchboxType(LunchboxType.ThreeCompartments);
+            }
+            else if (pairedKeyboard.digit4Key.wasPressedThisFrame)
+            {
                 SelectLunchboxType(LunchboxType.FourCompartments);
+            }
+            else if (pairedKeyboard.digit5Key.wasPressedThisFrame)
+            {
+                SelectLunchboxType(LunchboxType.FiveCompartments);
             }
         }
     }
