@@ -26,6 +26,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [Header("Camera")] [SerializeField] private Camera playerCamera;
         [SerializeField] private Transform cameraPivot;
 
+        [Header("Cook transport")] [SerializeField] private Transform mealboxCarryPoint;
+
         private CharacterController characterController;
         private PlayerInteractor interactor;
         private Vector3 velocity;
@@ -52,6 +54,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private string selectedPickupOrderId;
         private string gameplayMessage;
         private float baseMoveSpeed;
+        private MealboxPhysical carriedPreparedMealbox;
 
         public event Action PreparationChanged;
         public event Action InventoryChanged;
@@ -83,6 +86,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public LunchboxType SelectedLunchboxType => selectedLunchboxType;
         public IReadOnlyList<string> CurrentIngredientIds => currentIngredients;
         public IReadOnlyList<IngredientData> CurrentIngredientData => currentIngredientData;
+        public MealboxPhysical CarriedPreparedMealbox => carriedPreparedMealbox;
 
         private void Awake()
         {
@@ -428,6 +432,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
+            if (GameManager.Instance != null && !GameManager.Instance.IsIngredientIdUnlocked(ingredientId))
+            {
+                ShowGameplayMessage($"Ingrediente bloqueado: {displayName}.");
+                return false;
+            }
+
             currentIngredients.Add(ingredientId.Trim());
             currentIngredientData.Add(null);
             preparationMessage = $"Adicionado: {displayName}.";
@@ -441,6 +451,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (ingredient == null || !HasActivePreparation || completingPreparation)
             {
+                return false;
+            }
+
+            if (GameManager.Instance != null && !GameManager.Instance.IsIngredientUnlocked(ingredient))
+            {
+                ShowGameplayMessage($"Ingrediente bloqueado: {ingredient.DisplayName}.");
                 return false;
             }
 
@@ -543,7 +559,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             completingPreparation = true;
             bool completed = GameManager.Instance.TryCompletePreparation(
-                selectedOrderId, currentIngredients, selectedLunchboxType, out string result);
+                selectedOrderId, currentIngredients, selectedLunchboxType, this, out string result);
             completingPreparation = false;
             if (!completed)
             {
@@ -563,6 +579,50 @@ namespace ColmeiaStudios.SoMaisUmPedido
             ClearIngredients();
             PreparationChanged?.Invoke();
             return true;
+        }
+
+        public Transform GetMealboxCarryPoint()
+        {
+            return mealboxCarryPoint != null ? mealboxCarryPoint : transform;
+        }
+
+        public bool CanCarryPreparedMealbox => assignedRole == PlayerRole.Cook && carriedPreparedMealbox == null;
+
+        public bool TryCarryPreparedMealbox(MealboxPhysical mealbox)
+        {
+            if (!CanCarryPreparedMealbox || mealbox == null)
+                return false;
+
+            carriedPreparedMealbox = mealbox;
+            Transform carryPoint = GetMealboxCarryPoint();
+            mealbox.transform.SetParent(carryPoint, false);
+            mealbox.transform.localPosition = mealboxCarryPoint != null ? Vector3.zero : new Vector3(0f, 1f, 0.55f);
+            mealbox.transform.localRotation = Quaternion.identity;
+            PreparationChanged?.Invoke();
+            return true;
+        }
+
+        public MealboxPhysical ReleasePreparedMealbox()
+        {
+            MealboxPhysical mealbox = carriedPreparedMealbox;
+            carriedPreparedMealbox = null;
+            preparationMessage = "Marmita depositada no balcão.";
+            PreparationChanged?.Invoke();
+            return mealbox;
+        }
+
+        public void RemovePreparedMealbox(string orderId)
+        {
+            if (carriedPreparedMealbox == null ||
+                !string.Equals(carriedPreparedMealbox.OrderId, orderId, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            MealboxPhysical mealbox = carriedPreparedMealbox;
+            carriedPreparedMealbox = null;
+            if (mealbox != null)
+                Destroy(mealbox.gameObject);
+            preparationMessage = "A marmita expirou antes de ser depositada.";
+            PreparationChanged?.Invoke();
         }
 
         private void TryCompletePreparationIfExact()
@@ -644,6 +704,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public void SelectLunchboxType(LunchboxType type)
         {
+            if (GameManager.Instance != null && !GameManager.Instance.IsLunchboxUnlocked(type))
+            {
+                ShowGameplayMessage("Esse tipo de marmita ainda está bloqueado.");
+                return;
+            }
+
             selectedLunchboxType = type;
             if (!string.IsNullOrEmpty(selectedOrderId) && GameManager.Instance != null &&
                 GameManager.Instance.TryGetOrder(selectedOrderId, out OrderRecord order) &&
@@ -881,6 +947,26 @@ namespace ColmeiaStudios.SoMaisUmPedido
             kifomePhone = phone;
             kifomePhone?.SetMousePointerEnabled(UsesMouseAndKeyboard);
             kifomePhone?.BindGameplay(this, GameManager.Instance);
+        }
+
+        public void ResetDailyState()
+        {
+            if (carriedPreparedMealbox != null)
+            {
+                Destroy(carriedPreparedMealbox.gameObject);
+                carriedPreparedMealbox = null;
+            }
+
+            selectedOrderId = null;
+            selectedPickupOrderId = null;
+            selectedDeliveryOrderId = null;
+            carriedOrderIds.Clear();
+            completingPreparation = false;
+            preparationMessage = string.Empty;
+            ClearIngredients();
+            InventoryChanged?.Invoke();
+            DeliverySelectionChanged?.Invoke();
+            PreparationChanged?.Invoke();
         }
 
         public KifomePhoneUI AssignedPhone => kifomePhone;

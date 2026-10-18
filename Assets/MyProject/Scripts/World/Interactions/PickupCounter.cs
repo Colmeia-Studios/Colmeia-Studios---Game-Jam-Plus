@@ -75,12 +75,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public override bool CanInteract(PlayerController player)
         {
             PruneInvalidOrders();
-            return base.CanInteract(player) && player != null && player.AssignedRole == PlayerRole.Delivery &&
-                   readyOrderIds.Count > 0;
+            if (!base.CanInteract(player) || player == null)
+                return false;
+
+            if (player.AssignedRole == PlayerRole.Cook)
+                return player.CarriedPreparedMealbox != null;
+
+            return player.AssignedRole == PlayerRole.Delivery && readyOrderIds.Count > 0;
         }
 
         public override string GetInteractionText()
         {
+            PlayerController cookPlayer = GetPlayerForRole(PlayerRole.Cook);
+            if (cookPlayer != null && cookPlayer.CarriedPreparedMealbox != null)
+                return "Interagir para depositar a marmita pronta.";
+
             PlayerController deliveryPlayer = GameManager.Instance != null
                 ? GameManager.Instance.PlayerOne != null &&
                   GameManager.Instance.PlayerOne.AssignedRole == PlayerRole.Delivery
@@ -101,6 +110,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (player == null || !CanInteract(player) || orderManager == null)
             {
+                return;
+            }
+
+            if (player.AssignedRole == PlayerRole.Cook)
+            {
+                if (GameManager.Instance != null &&
+                    GameManager.Instance.TryDepositPreparedMealbox(player, out string depositResult))
+                {
+                    player.ShowGameplayMessage(depositResult);
+                }
+                else
+                {
+                    player.ShowGameplayMessage("Não foi possível depositar a marmita no balcão.");
+                }
+
                 return;
             }
 
@@ -169,6 +193,63 @@ namespace ColmeiaStudios.SoMaisUmPedido
             queuedOrderIds.Add(normalizedOrderId);
             readyMealboxes[normalizedOrderId] = mealbox;
             RefreshDisplayPositions();
+            return true;
+        }
+
+        public bool CanCreateCookCarriedMealbox(string orderId, PlayerController cook)
+        {
+            return !string.IsNullOrWhiteSpace(orderId) && cook != null &&
+                   cook.AssignedRole == PlayerRole.Cook && cook.CanCarryPreparedMealbox &&
+                   isActiveAndEnabled && gameObject.activeInHierarchy && orderManager != null &&
+                   mealboxPrefab != null && orderManager.TryGetOrder(orderId, out OrderRecord order) &&
+                   order.State == OrderState.InPreparation;
+        }
+
+        public bool TryCreateCookCarriedMealbox(
+            string orderId,
+            PlayerController cook,
+            out MealboxPhysical mealbox)
+        {
+            mealbox = null;
+            if (!CanCreateCookCarriedMealbox(orderId, cook) ||
+                !orderManager.TryGetOrder(orderId, out OrderRecord order))
+                return false;
+
+            mealbox = Instantiate(mealboxPrefab, cook.GetMealboxCarryPoint());
+            if (mealbox == null)
+                return false;
+
+            mealbox.Configure(order.OrderId, order.DisplayName);
+            return true;
+        }
+
+        public bool TryDepositCookMealbox(PlayerController cook, out string result)
+        {
+            result = "";
+            MealboxPhysical mealbox = cook != null ? cook.CarriedPreparedMealbox : null;
+            if (cook == null || cook.AssignedRole != PlayerRole.Cook || mealbox == null ||
+                orderManager == null || !orderManager.TryGetOrder(mealbox.OrderId, out OrderRecord order) ||
+                order.State != OrderState.ReadyForCookPickup || !CanRegisterReadyOrder(mealbox.OrderId))
+            {
+                result = "A marmita do Cook ou a vaga do balcão está indisponível.";
+                return false;
+            }
+
+            if (!orderManager.TryMarkDepositedForPickup(order.OrderId))
+            {
+                result = "O pedido expirou ou não pode ser depositado.";
+                return false;
+            }
+
+            cook.ReleasePreparedMealbox();
+            Transform spawnTransform = displayPoint != null ? displayPoint : transform;
+            mealbox.transform.SetParent(spawnTransform, true);
+            readyOrderIds.Add(order.OrderId);
+            queuedOrderIds.Add(order.OrderId);
+            readyMealboxes[order.OrderId] = mealbox;
+            RefreshDisplayPositions();
+            orderManager.NotifyOrdersChanged();
+            result = $"Pedido #{order.OrderId} depositado. O Delivery pode retirá-lo.";
             return true;
         }
 
@@ -296,6 +377,15 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     basePosition + offset,
                     spawnTransform.rotation);
             }
+        }
+
+        private static PlayerController GetPlayerForRole(PlayerRole role)
+        {
+            GameManager manager = GameManager.Instance;
+            if (manager == null) return null;
+            if (manager.PlayerOne != null && manager.PlayerOne.AssignedRole == role) return manager.PlayerOne;
+            if (manager.PlayerTwo != null && manager.PlayerTwo.AssignedRole == role) return manager.PlayerTwo;
+            return null;
         }
     }
 }

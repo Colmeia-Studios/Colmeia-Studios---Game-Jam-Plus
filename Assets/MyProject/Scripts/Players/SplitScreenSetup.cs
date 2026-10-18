@@ -12,6 +12,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
     {
         [SerializeField] private Camera targetCamera;
         [SerializeField] private ScreenSide screenSide = ScreenSide.Left;
+        private bool roleAssignmentApplied;
 
         private void Reset()
         {
@@ -20,6 +21,16 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Start()
         {
+            if (!roleAssignmentApplied)
+            {
+                ApplySplit();
+            }
+        }
+
+        public void SetScreenSide(ScreenSide side)
+        {
+            screenSide = side;
+            roleAssignmentApplied = true;
             ApplySplit();
         }
 

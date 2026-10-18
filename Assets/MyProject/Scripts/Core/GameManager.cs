@@ -4,6 +4,34 @@ using UnityEngine;
 
 namespace ColmeiaStudios.SoMaisUmPedido
 {
+    public sealed class DailyMatchResult
+    {
+        public DailyMatchResult(int day, int deliveries, int deliveryGoal, int expiredOrders, float closingBalance, int reputation)
+        {
+            Day = day;
+            Deliveries = deliveries;
+            DeliveryGoal = deliveryGoal;
+            ExpiredOrders = expiredOrders;
+            ClosingBalance = closingBalance;
+            Reputation = reputation;
+        }
+
+        public int Day { get; }
+        public int Deliveries { get; }
+        public int DeliveryGoal { get; }
+        public int ExpiredOrders { get; }
+        public float ClosingBalance { get; }
+        public int Reputation { get; }
+    }
+
+    public enum MatchCycleState
+    {
+        NotStarted,
+        Working,
+        DayEnded,
+        Transitioning
+    }
+
     public class GameManager : MonoBehaviour
     {
         private static readonly float[] ReputationMultipliers = { 0.40f, 0.52f, 0.64f, 0.76f, 0.88f, 1f };
@@ -19,6 +47,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [Header("Players")] [SerializeField] private PlayerController playerOne;
         [SerializeField] private PlayerController playerTwo;
         [SerializeField] private DeliveryUI deliveryUI;
+        [SerializeField] private CookPreparationUI cookPrepationUI;
 
         [Header("Player spawn points")] [SerializeField]
         private Transform cookSpawn;
@@ -32,6 +61,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private readonly HashSet<string> paidOrderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> purchasedUpgradeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<DailyMatchResult> dailyResults = new List<DailyMatchResult>();
         private float elapsedSeconds;
         private float nextClockNotification;
         private float balance = 500f;
@@ -40,11 +70,18 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private int endHour = 19;
         private float secondsPerHour = 40f;
         private bool isDayComplete;
+        private MatchCycleState cycleState = MatchCycleState.NotStarted;
+        private int currentDay;
+        private float transitionElapsed;
         private int dailyDeliveryGoal = 7;
         private int completedDailyDeliveries;
+        private PlayerRole lastBoundPlayerOneRole;
+        private PlayerRole lastBoundPlayerTwoRole;
+        private bool roleBindingsInitialized;
 
         public event Action MatchStateChanged;
         public event Action ClockChanged;
+        public event Action MatchCycleChanged;
 
         public MatchConfig MatchConfiguration => matchConfig;
         public OrderManager Orders => orderManager;
@@ -56,7 +93,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public int Reputation => reputation;
         public int DailyDeliveryGoal => dailyDeliveryGoal;
         public int CompletedDailyDeliveries => completedDailyDeliveries;
-        public bool IsDayComplete => isDayComplete;
+        public int CurrentDay => currentDay;
+        public IReadOnlyList<DailyMatchResult> DailyResults => dailyResults;
+        public MatchCycleState CycleState => cycleState;
+        public bool IsDayComplete => cycleState == MatchCycleState.DayEnded ||
+                                     cycleState == MatchCycleState.Transitioning;
+        public bool IsWorkDayActive => cycleState == MatchCycleState.Working;
         public float DayDurationSeconds => Mathf.Max(0f, (endHour - startHour) * secondsPerHour);
 
         public string ClockText
@@ -101,6 +143,15 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (matchConfig != null)
             {
+                if (!IsValidDayConfiguration(matchConfig))
+                {
+                    Debug.LogError(
+                        "MatchConfig possui horários, intervalo de geração, prazo, duração de hora ou meta diária inválidos.",
+                        matchConfig);
+                    enabled = false;
+                    return;
+                }
+
                 startHour = matchConfig.StartHour;
                 endHour = matchConfig.EndHour;
                 secondsPerHour = matchConfig.RealSecondsPerGameHour;
@@ -110,13 +161,51 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             ConfigurePlayers();
-            MatchStateChanged?.Invoke();
-            ClockChanged?.Invoke();
+            BeginDay();
+        }
+
+        private static bool IsValidDayConfiguration(MatchConfig config)
+        {
+            return config.EndHour > config.StartHour &&
+                   IsFinitePositive(config.RealSecondsPerGameHour) &&
+                   IsFinitePositive(config.OrderGenerationIntervalSeconds) &&
+                   IsFinitePositive(config.OrderDeadlineSeconds) &&
+                   config.NextDayTransitionSeconds >= 0f &&
+                   !float.IsNaN(config.NextDayTransitionSeconds) &&
+                   !float.IsInfinity(config.NextDayTransitionSeconds) &&
+                   config.DailyDeliveryGoal > 0;
+        }
+
+        private static bool IsFinitePositive(float value)
+        {
+            return value > 0f && !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         private void Update()
         {
-            if (isDayComplete || secondsPerHour <= 0f)
+            RefreshRoleBindingsIfChanged();
+
+            if (cycleState == MatchCycleState.DayEnded)
+            {
+                cycleState = MatchCycleState.Transitioning;
+                transitionElapsed = 0f;
+                MatchCycleChanged?.Invoke();
+                return;
+            }
+
+            if (cycleState == MatchCycleState.Transitioning)
+            {
+                float transitionDuration = matchConfig != null ? matchConfig.NextDayTransitionSeconds : 5f;
+                transitionElapsed += Time.deltaTime;
+                if (transitionElapsed >= transitionDuration)
+                {
+                    BeginNextDay();
+                }
+
+                return;
+            }
+
+            if (cycleState != MatchCycleState.Working || secondsPerHour <= 0f)
             {
                 return;
             }
@@ -124,7 +213,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             elapsedSeconds = Mathf.Min(DayDurationSeconds, elapsedSeconds + Time.deltaTime);
             if (elapsedSeconds >= DayDurationSeconds)
             {
-                isDayComplete = true;
+                elapsedSeconds = DayDurationSeconds;
+                EndWorkDay();
             }
 
             if (elapsedSeconds >= nextClockNotification)
@@ -132,6 +222,68 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 nextClockNotification = elapsedSeconds + 1f;
                 ClockChanged?.Invoke();
             }
+        }
+
+        private void BeginDay()
+        {
+            currentDay++;
+            elapsedSeconds = 0f;
+            completedDailyDeliveries = 0;
+            isDayComplete = false;
+            cycleState = MatchCycleState.Working;
+            nextClockNotification = 1f;
+            transitionElapsed = 0f;
+            orderManager?.BeginDay();
+            foreach (PlayerController player in GetPlayers())
+            {
+                player?.ResetDailyState();
+            }
+
+            MatchCycleChanged?.Invoke();
+            MatchStateChanged?.Invoke();
+            ClockChanged?.Invoke();
+        }
+
+        private void BeginNextDay()
+        {
+            if (cycleState != MatchCycleState.Transitioning)
+                return;
+
+            BeginDay();
+        }
+
+        private void EndWorkDay()
+        {
+            if (cycleState != MatchCycleState.Working)
+                return;
+
+            cycleState = MatchCycleState.DayEnded;
+            isDayComplete = true;
+            orderManager?.EndDay();
+            int delivered = completedDailyDeliveries;
+            int expired = 0;
+            orderManager?.GetDayOrderCounts(currentDay, out delivered, out expired);
+            dailyResults.Add(new DailyMatchResult(
+                currentDay,
+                delivered,
+                dailyDeliveryGoal,
+                expired,
+                balance,
+                reputation));
+            foreach (PlayerController player in GetPlayers())
+            {
+                player?.ResetDailyState();
+            }
+
+            MatchCycleChanged?.Invoke();
+            MatchStateChanged?.Invoke();
+            ClockChanged?.Invoke();
+        }
+
+        private IEnumerable<PlayerController> GetPlayers()
+        {
+            yield return playerOne;
+            yield return playerTwo;
         }
 
         private void OnDestroy()
@@ -195,14 +347,49 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 playerTwo.transform.SetPositionAndRotation(playerTwoSpawnPoint.position, playerTwoSpawnPoint.rotation);
             }
 
-            ConfigureRoleInterfaces(playerOneRole, playerTwoRole);
+            ConfigureRoleInterfaces();
 
         }
 
-        private void ConfigureRoleInterfaces(PlayerRole playerOneRole, PlayerRole playerTwoRole)
+        public void RefreshRoleAssignments()
         {
+            ConfigureRoleInterfaces();
+        }
+
+        private void RefreshRoleBindingsIfChanged()
+        {
+            if (playerOne == null || playerTwo == null)
+                return;
+
+            if (!roleBindingsInitialized ||
+                playerOne.AssignedRole != lastBoundPlayerOneRole ||
+                playerTwo.AssignedRole != lastBoundPlayerTwoRole)
+            {
+                ConfigureRoleInterfaces();
+            }
+        }
+
+        private void ConfigureRoleInterfaces()
+        {
+            if (playerOne != null && playerTwo != null)
+            {
+                lastBoundPlayerOneRole = playerOne.AssignedRole;
+                lastBoundPlayerTwoRole = playerTwo.AssignedRole;
+                roleBindingsInitialized = true;
+            }
+
+            if (playerOne == null || playerTwo == null || playerOne.AssignedRole == playerTwo.AssignedRole)
+            {
+                Debug.LogError("GameManager requires exactly one Cook and one Delivery player before binding cameras and interfaces.", this);
+                return;
+            }
+
+            PlayerRole playerOneRole = playerOne.AssignedRole;
+            PlayerRole playerTwoRole = playerTwo.AssignedRole;
             PlayerController cookPlayer = playerOneRole == PlayerRole.Cook ? playerOne : playerTwo;
             PlayerController deliveryPlayer = playerOneRole == PlayerRole.Delivery ? playerOne : playerTwo;
+            AssignCameraSide(cookPlayer, ScreenSide.Left);
+            AssignCameraSide(deliveryPlayer, ScreenSide.Right);
             KifomePhoneUI firstPhone = playerOne.AssignedPhone;
             KifomePhoneUI secondPhone = playerTwo.AssignedPhone;
             KifomePhoneUI cookPhone = GetPhoneForRole(firstPhone, secondPhone, PlayerRole.Cook);
@@ -226,6 +413,33 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             deliveryUI.BindGameplay(deliveryPlayer, this);
+            if (cookPrepationUI != null)
+            {
+                cookPrepationUI.BindGameplay(cookPlayer, this);
+            }
+            else
+            {
+                Debug.LogError("GameManager is missing its CookPreparationUI reference.", this);
+            }
+        }
+
+        private void AssignCameraSide(PlayerController player, ScreenSide side)
+        {
+            Camera roleCamera = player != null ? player.GetCamera() : null;
+            if (roleCamera == null)
+            {
+                Debug.LogError($"Cannot assign {side} split-screen to a player without a Camera.", player);
+                return;
+            }
+
+            SplitScreenSetup split = roleCamera.GetComponent<SplitScreenSetup>();
+            if (split == null)
+            {
+                Debug.LogError($"Camera '{roleCamera.name}' requires a SplitScreenSetup component.", roleCamera);
+                return;
+            }
+
+            split.SetScreenSide(side);
         }
 
         private static KifomePhoneUI GetPhoneForRole(
@@ -257,32 +471,51 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryStartPreparation(string orderId)
         {
-            return orderManager != null && orderManager.TryStartPreparation(orderId);
+            return IsWorkDayActive && orderManager != null && orderManager.TryStartPreparation(orderId);
         }
 
         public bool TryCompletePreparation(
             string orderId,
             IReadOnlyList<string> ingredientIds,
             LunchboxType lunchboxType,
+            PlayerController cook,
             out string result)
         {
-            if (orderManager == null)
+            if (!IsWorkDayActive || orderManager == null)
             {
-                result = "OrderManager não está configurado.";
+                result = !IsWorkDayActive ? "O expediente foi encerrado." : "OrderManager não está configurado.";
                 return false;
             }
 
-            return orderManager.TryCompletePreparation(orderId, ingredientIds, lunchboxType, out result);
+            return orderManager.TryCompletePreparation(orderId, ingredientIds, lunchboxType, cook, out result);
+        }
+
+        public bool TryDepositPreparedMealbox(PlayerController cook, out string result)
+        {
+            if (!IsWorkDayActive || cook == null || cook.AssignedRole != PlayerRole.Cook ||
+                sharedPickupCounter == null)
+            {
+                result = "O Cook ou o balcão não está disponível para depositar a marmita.";
+                return false;
+            }
+
+            return sharedPickupCounter.TryDepositCookMealbox(cook, out result);
+        }
+
+        public void RemovePreparedMealbox(string orderId)
+        {
+            if (playerOne != null) playerOne.RemovePreparedMealbox(orderId);
+            if (playerTwo != null) playerTwo.RemovePreparedMealbox(orderId);
         }
 
         public bool CancelPreparation(string orderId)
         {
-            return orderManager != null && orderManager.TryCancelPreparation(orderId);
+            return IsWorkDayActive && orderManager != null && orderManager.TryCancelPreparation(orderId);
         }
 
         public bool TryPickupOrder(string orderId, PlayerController player)
         {
-            if (player == null || player.AssignedRole != PlayerRole.Delivery ||
+            if (!IsWorkDayActive || player == null || player.AssignedRole != PlayerRole.Delivery ||
                 orderManager == null ||
                 sharedPickupCounter == null ||
                 !player.CanAddOrderToInventory(orderId) ||
@@ -315,7 +548,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryProcessOrderPayment(OrderRecord order)
         {
-            if (order == null || order.State != OrderState.InDelivery ||
+            if (!IsWorkDayActive || order == null || order.State != OrderState.InDelivery ||
                 paidOrderIds.Contains(order.OrderId))
             {
                 return false;
@@ -361,10 +594,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             paidOrderIds.Add(order.OrderId);
             balance = updatedBalance;
-            if (!isOverdue)
-            {
-                completedDailyDeliveries++;
-            }
+            completedDailyDeliveries++;
 
             MatchStateChanged?.Invoke();
             return true;
@@ -426,6 +656,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
         internal void NotifyMatchStateChanged()
         {
             MatchStateChanged?.Invoke();
+        }
+
+        public bool IsIngredientUnlocked(IngredientData ingredient)
+        {
+            return matchConfig == null || matchConfig.IsIngredientUnlocked(ingredient, Mathf.Max(1, currentDay));
+        }
+
+        public bool IsIngredientIdUnlocked(string ingredientId)
+        {
+            return matchConfig == null || matchConfig.IsIngredientIdUnlocked(ingredientId, Mathf.Max(1, currentDay));
+        }
+
+        public bool IsLunchboxUnlocked(LunchboxType type)
+        {
+            return matchConfig == null || matchConfig.IsLunchboxUnlocked(type, Mathf.Max(1, currentDay));
         }
 
         private Transform GetSpawnPointForRole(PlayerRole role)

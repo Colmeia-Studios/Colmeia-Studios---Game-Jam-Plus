@@ -10,6 +10,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField] private Transform backpackContent;
         [SerializeField] private TMP_Text mealNamePrefab;
         [SerializeField] private TMP_Text backpackCountText;
+        [SerializeField] private Canvas gameplayCanvas;
 
         private readonly List<TMP_Text> mealNames = new List<TMP_Text>(3);
         private GameManager gameManager;
@@ -36,6 +37,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             deliveryPlayer = player;
             gameManager = match;
             orderManager = gameManager != null ? gameManager.Orders : null;
+            gameplayCanvas ??= GetComponentInParent<Canvas>();
 
             List<string> missing = new List<string>();
             if (deliveryPlayer == null)
@@ -47,6 +49,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (backpackContent == null) missing.Add("Backpack Content (Inspector)");
             if (mealNamePrefab == null) missing.Add("Meal Name Prefab (Inspector)");
             if (backpackCountText == null) missing.Add("Backpack Count Text (Inspector)");
+            if (gameplayCanvas == null) missing.Add("parent Canvas (DeliveryPanel)");
+            if (deliveryPlayer != null && deliveryPlayer.GetCamera() == null) missing.Add("Delivery player camera");
 
             if (missing.Count > 0)
             {
@@ -55,6 +59,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return;
             }
 
+            gameplayCanvas.renderMode = RenderMode.ScreenSpaceCamera;
+            gameplayCanvas.worldCamera = deliveryPlayer.GetCamera();
+            gameplayCanvas.overrideSorting = true;
+            gameplayCanvas.sortingOrder = 100;
             initialized = true;
             Subscribe();
             Refresh();

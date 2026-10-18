@@ -21,7 +21,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
         ReadyForPickup,
         InDelivery,
         Delivered,
-        Expired
+        Expired,
+        ReadyForCookPickup
     }
 
     [Serializable]
@@ -47,9 +48,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private readonly ReadOnlyCollection<string> requiredIngredientIds;
         private readonly ReadOnlyCollection<IngredientData> requiredIngredients;
 
-        internal OrderRecord(OrderData definition, HouseData destination, float deadlineSeconds)
+        internal OrderRecord(
+            OrderData definition,
+            HouseData destination,
+            float deadlineSeconds,
+            string runtimeId = null,
+            int dayNumber = 1)
         {
-            OrderId = definition.Id.Trim();
+            OrderId = string.IsNullOrWhiteSpace(runtimeId) ? definition.Id.Trim() : runtimeId.Trim();
             DisplayName = string.IsNullOrWhiteSpace(definition.DisplayName)
                 ? OrderId
                 : definition.DisplayName.Trim();
@@ -66,14 +72,15 @@ namespace ColmeiaStudios.SoMaisUmPedido
             LunchboxType = definition.LunchboxType;
             BaseValue = definition.CalculateBaseValue();
             DeadlineSeconds = deadlineSeconds;
+            DayNumber = Mathf.Max(1, dayNumber);
             Destination = destination;
             DestinationHouseId = destination.Id.Trim();
             State = OrderState.Pending;
         }
 
-        internal OrderRecord(OrderDefinition definition, HouseData destination)
+        internal OrderRecord(OrderDefinition definition, HouseData destination, string runtimeId = null, int dayNumber = 1)
         {
-            OrderId = definition.OrderId.Trim();
+            OrderId = string.IsNullOrWhiteSpace(runtimeId) ? definition.OrderId.Trim() : runtimeId.Trim();
             DisplayName = OrderId;
             var ids = new List<string>(definition.RequiredIngredients.Count);
             foreach (string id in definition.RequiredIngredients)
@@ -86,6 +93,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             LunchboxType = definition.LunchboxType;
             BaseValue = definition.BaseValue;
             DeadlineSeconds = definition.DeadlineSeconds;
+            DayNumber = Mathf.Max(1, dayNumber);
             Destination = destination;
             DestinationHouseId = destination.Id.Trim();
             State = OrderState.Pending;
@@ -98,11 +106,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public LunchboxType LunchboxType { get; }
         public float BaseValue { get; }
         public float DeadlineSeconds { get; }
+        public int DayNumber { get; }
         public string DestinationHouseId { get; }
         public HouseData Destination { get; }
         public float ActivatedAt { get; private set; }
         public float PickedUpAt { get; private set; }
         public OrderState State { get; private set; }
+        private bool hasSuspendedDeadline;
+        private float suspendedRemainingSeconds;
 
         public float GetRemainingSeconds(float currentTime)
         {
@@ -122,8 +133,24 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         internal void Activate(float currentTime)
         {
-            ActivatedAt = currentTime;
+            if (hasSuspendedDeadline)
+            {
+                ActivatedAt = currentTime - (DeadlineSeconds - suspendedRemainingSeconds);
+                hasSuspendedDeadline = false;
+            }
+            else
+            {
+                ActivatedAt = currentTime;
+            }
+
             State = OrderState.Available;
+        }
+
+        internal void SuspendAsPending(float currentTime)
+        {
+            suspendedRemainingSeconds = GetRemainingSeconds(currentTime);
+            hasSuspendedDeadline = true;
+            State = OrderState.Pending;
         }
 
         internal void MarkPickedUp(float currentTime)
@@ -140,22 +167,43 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
     public sealed class OrderManager : MonoBehaviour
     {
+        private const int MaximumWaitingOrders = 4;
+        private const int MaximumOrdersInPreparation = 1;
+
+        private sealed class LegacyTemplate
+        {
+            public OrderDefinition Definition;
+            public HouseData Destination;
+        }
+
         [Header("Data-driven catalog")] [SerializeField]
         private MatchConfig matchConfig;
 
-        [Header("Legacy scene catalog (fallback only without MatchConfig)")] [SerializeField, Range(4, 6)]
+        [Header("Legacy scene catalog (fallback only without MatchConfig)")]
+        [Tooltip("Retido para compatibilidade. A capacidade da fila é fixa: quatro aguardando e um em preparação.")]
+        [SerializeField, Range(4, 6)]
         private int maximumActiveOrders = 5;
 
         [SerializeField] private List<OrderDefinition> orderCatalog = new List<OrderDefinition>();
 
         private readonly List<OrderRecord> activeOrders = new List<OrderRecord>();
         private readonly List<OrderRecord> allOrders = new List<OrderRecord>();
+        private readonly Queue<OrderRecord> pendingOrders = new Queue<OrderRecord>();
         private ReadOnlyCollection<OrderRecord> activeOrdersView;
 
         private readonly Dictionary<string, OrderRecord> ordersById =
             new Dictionary<string, OrderRecord>(StringComparer.OrdinalIgnoreCase);
 
-        private int activeOrderLimit = 5;
+        private readonly List<OrderData> validOrderCatalog = new List<OrderData>();
+        private readonly List<HouseData> validHouses = new List<HouseData>();
+        private readonly List<LegacyTemplate> validLegacyCatalog = new List<LegacyTemplate>();
+        private IngredientStation[] sceneIngredientStations = Array.Empty<IngredientStation>();
+        private HouseDeliveryInteractable[] sceneHouseInteractables = Array.Empty<HouseDeliveryInteractable>();
+        private float nextGenerationAt;
+        private int generatedOrderSequence;
+        private int lastDayWithoutRecipesWarning = -1;
+        private bool noEligibleOrdersForDay;
+        private bool progressionRulesValid;
         private bool initialized;
 
         public event Action OrdersChanged;
@@ -166,6 +214,24 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private float CurrentTime => GameManager.Instance != null
             ? GameManager.Instance.ElapsedSeconds
             : Time.time;
+
+        public int WaitingOrderCount => CountState(OrderState.Available);
+        public bool HasOrderInPreparation => CountState(OrderState.InPreparation) > 0;
+        public IReadOnlyList<OrderRecord> OrderHistory => allOrders;
+
+        public void GetDayOrderCounts(int day, out int delivered, out int expired)
+        {
+            delivered = 0;
+            expired = 0;
+            foreach (OrderRecord order in allOrders)
+            {
+                if (order.DayNumber != day)
+                    continue;
+
+                if (order.State == OrderState.Delivered) delivered++;
+                else if (order.State == OrderState.Expired) expired++;
+            }
+        }
 
         private void Awake()
         {
@@ -201,10 +267,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Update()
         {
-            if (initialized)
+            if (!initialized || (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive))
+                return;
+
+            ExpireDueOrders();
+            if (ActivatePendingOrders())
+                OrdersChanged?.Invoke();
+            if (noEligibleOrdersForDay || CurrentTime < nextGenerationAt ||
+                WaitingOrderCount >= MaximumWaitingOrders)
             {
-                ExpireDueOrders();
+                return;
             }
+
+            GenerateOneOrder();
+            float interval = matchConfig != null ? matchConfig.OrderGenerationIntervalSeconds : 8f;
+            nextGenerationAt = CurrentTime + Mathf.Max(0.1f, interval);
         }
 
         private void OnValidate()
@@ -253,11 +330,20 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryStartPreparation(string orderId)
         {
+            if (CountState(OrderState.InPreparation) >= MaximumOrdersInPreparation ||
+                (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive))
+            {
+                return false;
+            }
+
             return TryChangeState(orderId, OrderState.Available, OrderState.InPreparation, true);
         }
 
         public bool TryMarkPickedUp(string orderId)
         {
+            if (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive)
+                return false;
+
             if (!TryGetOrder(orderId, out OrderRecord order) ||
                 order.State != OrderState.ReadyForPickup)
             {
@@ -306,7 +392,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
-            order.SetState(OrderState.Available);
+            // A cancelled preparation returns to the waiting queue. If the
+            // four visible waiting places are full, keep it pending until a
+            // place opens instead of exceeding the queue limit.
+            order.SuspendAsPending(CurrentTime);
+            activeOrders.Remove(order);
+            pendingOrders.Enqueue(order);
+            ActivatePendingOrders();
             OrdersChanged?.Invoke();
             return true;
         }
@@ -315,8 +407,15 @@ namespace ColmeiaStudios.SoMaisUmPedido
             string orderId,
             IReadOnlyList<string> addedIngredientIds,
             LunchboxType lunchboxType,
+            PlayerController cook,
             out string result)
         {
+            if (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive)
+            {
+                result = "O expediente foi encerrado.";
+                return false;
+            }
+
             if (!TryGetOrder(orderId, out OrderRecord order) ||
                 order.State != OrderState.InPreparation)
             {
@@ -347,28 +446,62 @@ namespace ColmeiaStudios.SoMaisUmPedido
             PickupCounter counter = GameManager.Instance != null
                 ? GameManager.Instance.SharedPickupCounter
                 : null;
-            if (counter == null || !counter.CanRegisterReadyOrder(orderId))
+            if (cook == null || cook.AssignedRole != PlayerRole.Cook || counter == null ||
+                !counter.CanCreateCookCarriedMealbox(orderId, cook))
             {
-                result = "Balcão compartilhado ausente ou indisponível.";
+                result = "Não foi possível disponibilizar a marmita para o Cook. Verifique o balcão e o ponto de transporte.";
                 return false;
             }
 
-            order.SetState(OrderState.ReadyForPickup);
-            if (!counter.TryRegisterReadyOrder(orderId))
+            if (!counter.TryCreateCookCarriedMealbox(orderId, cook, out MealboxPhysical mealbox))
+            {
+                result = "Não foi possível criar a marmita física para transporte pelo Cook.";
+                return false;
+            }
+
+            order.SetState(OrderState.ReadyForCookPickup);
+            if (!cook.TryCarryPreparedMealbox(mealbox))
             {
                 order.SetState(OrderState.InPreparation);
-                result = "Não foi possível registrar o pedido no balcão.";
+                Destroy(mealbox.gameObject);
+                result = "Não foi possível vincular a marmita concluída ao Cook.";
                 return false;
             }
 
-            result = $"Pedido #{orderId} pronto e colocado no balcão.";
+            result = $"Pedido #{orderId} pronto. Leve a marmita até o balcão.";
+            ActivatePendingOrders();
             OrdersChanged?.Invoke();
             return true;
         }
 
+        public bool TryMarkDepositedForPickup(string orderId)
+        {
+            if (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive)
+                return false;
+
+            if (!TryGetOrder(orderId, out OrderRecord order) ||
+                order.State != OrderState.ReadyForCookPickup)
+                return false;
+
+            if (order.GetRemainingSeconds(CurrentTime) <= 0f)
+            {
+                Expire(order);
+                return false;
+            }
+
+            order.SetState(OrderState.ReadyForPickup);
+            return true;
+        }
+
+        internal void NotifyOrdersChanged()
+        {
+            OrdersChanged?.Invoke();
+        }
+
         public bool TryDeliverToHouse(string orderId, HouseData house, PlayerController player)
         {
-            if (house == null || string.IsNullOrWhiteSpace(house.Id) ||
+            if (GameManager.Instance == null || !GameManager.Instance.IsWorkDayActive ||
+                house == null || string.IsNullOrWhiteSpace(house.Id) ||
                 player == null || player.AssignedRole != PlayerRole.Delivery ||
                 !player.HasOrderInInventory(orderId) ||
                 !AreIdsEqual(player.SelectedDeliveryOrderId, orderId) ||
@@ -391,6 +524,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryExpireOrder(string orderId)
         {
+            if (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive)
+                return false;
+
             if (!TryGetOrder(orderId, out OrderRecord order) ||
                 order.State == OrderState.Pending ||
                 order.State == OrderState.Delivered ||
@@ -409,10 +545,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             activeOrders.Clear();
             allOrders.Clear();
+            pendingOrders.Clear();
             ordersById.Clear();
-            activeOrderLimit = matchConfig != null
-                ? Mathf.Clamp(matchConfig.MaximumActiveOrders, 4, 6)
-                : maximumActiveOrders;
+            validOrderCatalog.Clear();
+            validHouses.Clear();
+            validLegacyCatalog.Clear();
+            generatedOrderSequence = 0;
+            sceneIngredientStations = FindObjectsByType<IngredientStation>();
+            sceneHouseInteractables = FindObjectsByType<HouseDeliveryInteractable>();
 
             if (matchConfig != null)
             {
@@ -423,12 +563,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 InitializeLegacyOrders();
             }
 
-            ActivatePendingOrders();
             initialized = true;
-            if (activeOrders.Count == 0)
+            nextGenerationAt = CurrentTime;
+            if (validOrderCatalog.Count == 0 && validLegacyCatalog.Count == 0)
             {
-                Debug.LogWarning("OrderManager has no valid orders to activate. Check MatchConfig and its catalogs.",
-                    this);
+                Debug.LogWarning("OrderManager has no valid order templates. Check the active catalog and its houses/ingredients.", this);
             }
 
             OrdersChanged?.Invoke();
@@ -436,6 +575,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void InitializeConfiguredOrders()
         {
+            ValidateProgressionRules();
+            if (!progressionRulesValid)
+                return;
+
             List<HouseData> houses = GetValidConfiguredHouses();
             if (houses.Count == 0)
             {
@@ -475,9 +618,18 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     continue;
                 }
 
-                HouseData destination = houses[UnityEngine.Random.Range(0, houses.Count)];
-                AddOrder(new OrderRecord(data, destination, orderDeadlineSeconds));
+                validOrderCatalog.Add(data);
             }
+
+            foreach (OrderData data in validOrderCatalog)
+            {
+                if (!HasLunchboxUnlockRule(data.LunchboxType))
+                {
+                    Debug.LogError($"OrderData '{data.Id}' uses lunchbox '{data.LunchboxType}' without an unlock rule in MatchConfig.", data);
+                }
+            }
+
+            validHouses.AddRange(houses);
         }
 
         private List<HouseData> GetValidConfiguredHouses()
@@ -490,12 +642,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             var seenHouseIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            HouseDeliveryInteractable[] sceneHouses = FindObjectsByType<HouseDeliveryInteractable>();
             foreach (HouseData house in matchConfig.HouseCatalog)
             {
-                if (house == null || string.IsNullOrWhiteSpace(house.Id))
+                if (house == null || string.IsNullOrWhiteSpace(house.Id) ||
+                    string.IsNullOrWhiteSpace(house.CustomerName))
                 {
-                    Debug.LogError("MatchConfig contains a null HouseData or a house with an empty ID.", matchConfig);
+                    Debug.LogError("MatchConfig contains a null HouseData or a house without an ID/customer name.", matchConfig);
                     continue;
                 }
 
@@ -507,8 +659,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 }
 
                 bool isDeliverableInScene = false;
-                foreach (HouseDeliveryInteractable sceneHouse in sceneHouses)
+                foreach (HouseDeliveryInteractable sceneHouse in sceneHouseInteractables)
                 {
+                    if (sceneHouse == null)
+                        continue;
+
                     Collider doorCollider = sceneHouse.InteractionCollider;
                     if (sceneHouse.Data != null &&
                         AreIdsEqual(sceneHouse.Data.Id, id) &&
@@ -554,33 +709,200 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     continue;
                 }
 
-                AddOrder(new OrderRecord(definition, destination));
+                if (definition.RequiredIngredients.Count > GetCompartmentCount(definition.LunchboxType) ||
+                    !HasLegacyIngredientStations(definition.RequiredIngredients))
+                {
+                    Debug.LogError(
+                        $"Legacy order '{definition.OrderId}' exceeds its lunchbox compartments or requires an ingredient without an active station.",
+                        this);
+                    continue;
+                }
+
+                validLegacyCatalog.Add(new LegacyTemplate { Definition = definition, Destination = destination });
             }
         }
 
-        private void AddOrder(OrderRecord order)
+        private bool AddOrder(OrderRecord order)
         {
             if (ordersById.ContainsKey(order.OrderId))
             {
                 Debug.LogError($"Order catalog contains duplicate order ID '{order.OrderId}'. Entry ignored.", this);
-                return;
+                return false;
             }
 
             allOrders.Add(order);
             ordersById.Add(order.OrderId, order);
+            return true;
         }
 
-        private void ActivatePendingOrders()
+        public void BeginDay()
         {
-            for (int i = 0; i < allOrders.Count && activeOrders.Count < activeOrderLimit; i++)
+            nextGenerationAt = CurrentTime;
+            lastDayWithoutRecipesWarning = -1;
+            noEligibleOrdersForDay = false;
+        }
+
+        public void EndDay()
+        {
+            var expiredReadyIds = new List<string>();
+            var expiredCookCarriedIds = new List<string>();
+            foreach (OrderRecord order in allOrders)
             {
-                OrderRecord order = allOrders[i];
-                if (order.State == OrderState.Pending)
+                if (order.State == OrderState.Pending ||
+                    order.State == OrderState.Available ||
+                    order.State == OrderState.InPreparation ||
+                    order.State == OrderState.ReadyForCookPickup ||
+                    order.State == OrderState.ReadyForPickup ||
+                    order.State == OrderState.InDelivery)
                 {
-                    order.Activate(CurrentTime);
-                    activeOrders.Add(order);
+                    if (order.State == OrderState.ReadyForPickup)
+                        expiredReadyIds.Add(order.OrderId);
+                    else if (order.State == OrderState.ReadyForCookPickup)
+                        expiredCookCarriedIds.Add(order.OrderId);
+                    order.SetState(OrderState.Expired);
                 }
             }
+
+            foreach (string orderId in expiredReadyIds)
+                GameManager.Instance?.SharedPickupCounter?.RemoveReadyOrder(orderId);
+            foreach (string orderId in expiredCookCarriedIds)
+                GameManager.Instance?.RemovePreparedMealbox(orderId);
+
+            activeOrders.Clear();
+            pendingOrders.Clear();
+            OrdersChanged?.Invoke();
+        }
+
+        private int CountState(OrderState state)
+        {
+            int count = 0;
+            foreach (OrderRecord order in activeOrders)
+            {
+                if (order.State == state)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private void GenerateOneOrder()
+        {
+            if (WaitingOrderCount >= MaximumWaitingOrders)
+                return;
+
+            MatchConfig config = matchConfig;
+            int day = GameManager.Instance != null ? GameManager.Instance.CurrentDay : 1;
+            OrderRecord generatedOrder = null;
+            if (config != null)
+            {
+                var eligible = new List<OrderData>();
+                foreach (OrderData data in validOrderCatalog)
+                {
+                    if (IsOrderAvailableForDay(data, day))
+                        eligible.Add(data);
+                }
+
+                if (eligible.Count > 0 && validHouses.Count > 0)
+                {
+                    OrderData data = eligible[UnityEngine.Random.Range(0, eligible.Count)];
+                    HouseData destination = validHouses[UnityEngine.Random.Range(0, validHouses.Count)];
+                    float deadline = config.OrderDeadlineSeconds;
+                    string generatedId = $"D{day:00}-{++generatedOrderSequence:000}-{data.Id.Trim()}";
+                    generatedOrder = new OrderRecord(data, destination, deadline, generatedId, day);
+                }
+            }
+            else if (validLegacyCatalog.Count > 0)
+            {
+                LegacyTemplate template = validLegacyCatalog[UnityEngine.Random.Range(0, validLegacyCatalog.Count)];
+                string generatedId = $"D{day:00}-{++generatedOrderSequence:000}-{template.Definition.OrderId.Trim()}";
+                generatedOrder = new OrderRecord(template.Definition, template.Destination, generatedId, day);
+            }
+
+            if (generatedOrder == null)
+            {
+                noEligibleOrdersForDay = true;
+                if (lastDayWithoutRecipesWarning != day)
+                {
+                    Debug.LogWarning(
+                        $"Nenhum pedido válido está disponível no catálogo para o dia {day}. Revise OrderCatalog, desbloqueios, ingredientes/estações e casas no MatchConfig.",
+                        config != null ? config : this);
+                    lastDayWithoutRecipesWarning = day;
+                }
+
+                return;
+            }
+
+            generatedOrder.Activate(CurrentTime);
+            if (!AddOrder(generatedOrder))
+                return;
+
+            activeOrders.Add(generatedOrder);
+            OrdersChanged?.Invoke();
+        }
+
+        private bool IsOrderAvailableForDay(OrderData data, int day)
+        {
+            if (data == null || matchConfig == null || !matchConfig.IsLunchboxUnlocked(data.LunchboxType, day))
+                return false;
+
+            if (data.RequiredIngredients.Count > GetCompartmentCount(data.LunchboxType))
+                return false;
+
+            foreach (IngredientData ingredient in data.RequiredIngredients)
+            {
+                if (!matchConfig.IsIngredientUnlocked(ingredient, day) || !HasUsableIngredientStation(ingredient))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static int GetCompartmentCount(LunchboxType type)
+        {
+            return Enum.IsDefined(typeof(LunchboxType), type) ? (int)type + 2 : 0;
+        }
+
+        private bool HasUsableIngredientStation(IngredientData ingredient)
+        {
+            foreach (IngredientStation station in sceneIngredientStations)
+            {
+                if (station != null && station.isActiveAndEnabled && station.gameObject.activeInHierarchy &&
+                    station.Data == ingredient)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void ScheduleGenerationIfQueueHasRoom()
+        {
+            if (WaitingOrderCount < MaximumWaitingOrders)
+                nextGenerationAt = Mathf.Min(nextGenerationAt, CurrentTime);
+        }
+
+        private bool ActivatePendingOrders()
+        {
+            if (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive)
+                return false;
+
+            bool activated = false;
+            while (pendingOrders.Count > 0 && WaitingOrderCount < MaximumWaitingOrders)
+            {
+                OrderRecord order = pendingOrders.Dequeue();
+                if (order == null || order.State != OrderState.Pending)
+                    continue;
+
+                order.Activate(CurrentTime);
+                activeOrders.Add(order);
+                activated = true;
+            }
+
+            if (activated)
+                ScheduleGenerationIfQueueHasRoom();
+
+            return activated;
         }
 
         private bool IsOrderDataValid(OrderData data)
@@ -602,12 +924,50 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
+            if (string.IsNullOrWhiteSpace(data.Id) || !HasLunchboxUnlockRule(data.LunchboxType) ||
+                data.RequiredIngredients.Count > GetCompartmentCount(data.LunchboxType))
+            {
+                Debug.LogError(
+                    $"OrderData '{data.name}' has an invalid ID, an unconfigured lunchbox unlock, or more ingredients than compartments.",
+                    data);
+                return false;
+            }
+
+            var ingredientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (IngredientData ingredient in data.RequiredIngredients)
             {
                 if (ingredient == null || string.IsNullOrWhiteSpace(ingredient.Id))
                 {
                     Debug.LogError(
                         $"OrderData '{data.Id}' contains a null ingredient or an ingredient with an empty ID.", data);
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(ingredient.DisplayName))
+                {
+                    Debug.LogError($"IngredientData '{ingredient.name}' has no display name.", ingredient);
+                    return false;
+                }
+
+                if (!ingredientIds.Add(ingredient.Id.Trim()))
+                {
+                    Debug.LogError($"OrderData '{data.Id}' repeats ingredient ID '{ingredient.Id}'.", data);
+                    return false;
+                }
+
+                if (!HasIngredientUnlockRule(ingredient))
+                {
+                    Debug.LogError(
+                        $"MatchConfig has no unlock rule for ingredient '{ingredient.Id}' required by order '{data.Id}'.",
+                        matchConfig);
+                    return false;
+                }
+
+                if (!HasUsableIngredientStation(ingredient))
+                {
+                    Debug.LogError(
+                        $"OrderData '{data.Id}' requires ingredient '{ingredient.Id}', but the scene has no active IngredientStation using that asset.",
+                        data);
                     return false;
                 }
 
@@ -628,6 +988,112 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             return true;
+        }
+
+        private bool HasIngredientUnlockRule(IngredientData ingredient)
+        {
+            if (matchConfig.IngredientUnlocks == null)
+                return false;
+
+            int matches = 0;
+            foreach (IngredientUnlockRule rule in matchConfig.IngredientUnlocks)
+            {
+                if (rule != null && rule.Ingredient == ingredient && rule.AvailableFromDay >= 1)
+                    matches++;
+            }
+
+            return matches == 1;
+        }
+
+        private bool HasLunchboxUnlockRule(LunchboxType type)
+        {
+            if (matchConfig.LunchboxUnlocks == null)
+                return false;
+
+            int matches = 0;
+            foreach (LunchboxUnlockRule rule in matchConfig.LunchboxUnlocks)
+            {
+                if (rule != null && rule.LunchboxType == type && rule.AvailableFromDay >= 1)
+                    matches++;
+            }
+
+            return matches == 1;
+        }
+
+        private bool HasLegacyIngredientStations(IReadOnlyList<string> ingredientIds)
+        {
+            foreach (string rawId in ingredientIds)
+            {
+                string expectedId = IngredientStation.NormalizeLegacyId(rawId);
+                bool hasStation = false;
+                foreach (IngredientStation station in sceneIngredientStations)
+                {
+                    if (station != null && station.isActiveAndEnabled && station.gameObject.activeInHierarchy &&
+                        AreIdsEqual(IngredientStation.NormalizeLegacyId(station.IngredientId), expectedId))
+                    {
+                        hasStation = true;
+                        break;
+                    }
+                }
+
+                if (!hasStation)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private void ValidateProgressionRules()
+        {
+            progressionRulesValid = true;
+            if (matchConfig.IngredientUnlocks == null || matchConfig.LunchboxUnlocks == null)
+            {
+                Debug.LogError("MatchConfig progression lists are missing; configure ingredient and lunchbox unlock rules.", matchConfig);
+                progressionRulesValid = false;
+                return;
+            }
+
+            var ingredientRules = new HashSet<IngredientData>();
+            var ingredientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (IngredientUnlockRule rule in matchConfig.IngredientUnlocks)
+            {
+                if (rule == null || rule.Ingredient == null || string.IsNullOrWhiteSpace(rule.Ingredient.Id) ||
+                    rule.AvailableFromDay < 1)
+                {
+                    Debug.LogError("MatchConfig has an ingredient unlock rule with a missing asset or invalid day.", matchConfig);
+                    progressionRulesValid = false;
+                    continue;
+                }
+
+                if (!ingredientRules.Add(rule.Ingredient))
+                {
+                    Debug.LogError($"MatchConfig repeats the unlock rule for ingredient '{rule.Ingredient.Id}'.", matchConfig);
+                    progressionRulesValid = false;
+                }
+                if (!string.IsNullOrWhiteSpace(rule.Ingredient.Id) && !ingredientIds.Add(rule.Ingredient.Id.Trim()))
+                {
+                    Debug.LogError($"MatchConfig ingredient unlocks contain duplicate ID '{rule.Ingredient.Id}'.", matchConfig);
+                    progressionRulesValid = false;
+                }
+            }
+
+            var lunchboxRules = new HashSet<LunchboxType>();
+            foreach (LunchboxUnlockRule rule in matchConfig.LunchboxUnlocks)
+            {
+                if (rule == null || rule.AvailableFromDay < 1 ||
+                    !Enum.IsDefined(typeof(LunchboxType), rule.LunchboxType))
+                {
+                    Debug.LogError("MatchConfig has a lunchbox unlock rule with an invalid type or day.", matchConfig);
+                    progressionRulesValid = false;
+                    continue;
+                }
+
+                if (!lunchboxRules.Add(rule.LunchboxType))
+                {
+                    Debug.LogError($"MatchConfig repeats the unlock rule for lunchbox '{rule.LunchboxType}'.", matchConfig);
+                    progressionRulesValid = false;
+                }
+            }
         }
 
         private static bool IsLegacyDefinitionValid(OrderDefinition definition)
@@ -654,9 +1120,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private HouseData FindHouseData(string houseId)
         {
-            HouseDeliveryInteractable[] houses = FindObjectsByType<HouseDeliveryInteractable>();
-            foreach (HouseDeliveryInteractable house in houses)
+            foreach (HouseDeliveryInteractable house in sceneHouseInteractables)
             {
+                if (house == null)
+                    continue;
+
                 Collider doorCollider = house.InteractionCollider;
                 if (house.Data != null &&
                     AreIdsEqual(house.Data.Id, houseId) &&
@@ -738,6 +1206,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             order.SetState(nextState);
+            if (nextState == OrderState.InPreparation)
+                ScheduleGenerationIfQueueHasRoom();
             OrdersChanged?.Invoke();
             return true;
         }
@@ -768,14 +1238,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             bool wasReadyForPickup = order.State == OrderState.ReadyForPickup;
+            bool wasCarriedByCook = order.State == OrderState.ReadyForCookPickup;
             order.SetState(OrderState.Expired);
             if (wasReadyForPickup && GameManager.Instance != null)
             {
                 GameManager.Instance.SharedPickupCounter?.RemoveReadyOrder(order.OrderId);
             }
 
+            if (wasCarriedByCook)
+            {
+                GameManager.Instance?.RemovePreparedMealbox(order.OrderId);
+            }
+
             activeOrders.Remove(order);
             ActivatePendingOrders();
+            ScheduleGenerationIfQueueHasRoom();
             OrdersChanged?.Invoke();
         }
 

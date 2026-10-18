@@ -21,9 +21,30 @@ MonoBehaviour:
   - {fileID: 11400000, guid: d9f89b66bb934d4079d6c92928a7b4cd, type: 2}
   - {fileID: 11400000, guid: 87123c5c3487169aa96d2b07b8dbd536, type: 2}
   maximumActiveOrders: 5
+  orderGenerationIntervalSeconds: 8
   orderDeadlineSeconds: 120
+  ingredientUnlocks:
+  - ingredient: {fileID: 11400000, guid: e62d9d15d7683220dbe726d3a2bf76ff, type: 2}
+    availableFromDay: 1
+  - ingredient: {fileID: 11400000, guid: d77cbdd97b1ed70aa900f7fb90b8bbf4, type: 2}
+    availableFromDay: 1
+  - ingredient: {fileID: 11400000, guid: 02a7ed3c7d96351dc8cac5eb5ebcfc69, type: 2}
+    availableFromDay: 1
+  - ingredient: {fileID: 11400000, guid: e2b278f6618ee79219d60aea1dd394a8, type: 2}
+    availableFromDay: 1
+  lunchboxUnlocks:
+  - lunchboxType: 0
+    availableFromDay: 1
+  - lunchboxType: 1
+    availableFromDay: 1
+  - lunchboxType: 2
+    availableFromDay: 1
+  - lunchboxType: 3
+    availableFromDay: 1
   startHour: 11
   endHour: 19
   realSecondsPerGameHour: 40
+  nextDayTransitionSeconds: 5
   startingBalance: 500
   startingReputation: 5
+  dailyDeliveryGoal: 7

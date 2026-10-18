@@ -33,6 +33,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField] private TMP_Text balanceText;
         [SerializeField] private TMP_Text reputationText;
         [SerializeField] private TMP_Text dailyGoalText;
+        [SerializeField] private TMP_Text dayText;
 
         [Header("Controls")] [SerializeField] private bool mousePointerAllowed = true;
 
@@ -127,7 +128,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             restoreRaycasterEnabled = phoneRaycaster.enabled;
-            phoneCanvas.worldCamera = owner.GetCamera();
+            BindCanvasToOwnerCamera();
             initialized = true;
             BindRoleListeners();
             ShowPrimaryView();
@@ -181,10 +182,23 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     return;
                 }
 
-                phoneCanvas.worldCamera = owner.GetCamera();
+                BindCanvasToOwnerCamera();
                 Subscribe();
                 RefreshAll();
             }
+        }
+
+        private void BindCanvasToOwnerCamera()
+        {
+            if (phoneCanvas == null || owner == null || owner.GetCamera() == null)
+                return;
+
+            phoneCanvas.renderMode = RenderMode.ScreenSpaceCamera;
+            phoneCanvas.worldCamera = owner.GetCamera();
+            // Keep the HUD in the owner's camera viewport while drawing it above
+            // the world and canvases that share the display.
+            phoneCanvas.overrideSorting = true;
+            phoneCanvas.sortingOrder = 100;
         }
 
         public void Toggle()
@@ -446,6 +460,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             reputationText.text = $"{new string('★', reputation)}{new string('☆', 5 - reputation)}";
             dailyGoalText.text =
                 $"{gameManager.CompletedDailyDeliveries}/{gameManager.DailyDeliveryGoal}";
+            if (dayText != null)
+                dayText.text = $"DIA {gameManager.CurrentDay}";
         }
 
         private void UpdateCursorOwnership(bool open)

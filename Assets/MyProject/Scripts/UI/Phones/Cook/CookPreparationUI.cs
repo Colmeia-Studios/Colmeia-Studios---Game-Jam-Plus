@@ -7,7 +7,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 {
     public sealed class CookPreparationUI : MonoBehaviour
     {
-        [SerializeField] private PlayerController cook;
+        [SerializeField] private PlayerController cookPlayer;
         [SerializeField] private Transform ingredientContent;
         [SerializeField] private KifomeOrderListUI ingredientIndicatorPrefab;
         [SerializeField] private TMP_Text recipeNameText;
@@ -18,6 +18,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private readonly List<KifomeOrderListUI> indicators = new List<KifomeOrderListUI>();
         private string renderedOrderId;
+        private GameManager gameManager;
+        private OrderManager orderManager;
+        private Canvas preparationCanvas;
         private bool initialized;
 
         private void OnEnable()
@@ -29,106 +32,125 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
         }
 
-        private void Start()
-        {
-            if (cook == null)
-            {
-                Debug.LogError("CookPreparationUI requires its cook PlayerController to be assigned.", this);
-                enabled = false;
-                return;
-            }
-
-            if (ingredientContent == null || ingredientIndicatorPrefab == null || recipeNameText == null ||
-                preparationMealboxRenderer == null)
-            {
-                Debug.LogError(
-                    "CookPreparationUI requires Ingredient Content, an indicator prefab, the recipe name text, and the preparation mealbox Renderer.",
-                    this);
-                enabled = false;
-                return;
-            }
-
-            Subscribe();
-            initialized = true;
-            Refresh();
-        }
-
         private void OnDisable()
         {
-            if (!initialized)
+            Unsubscribe();
+        }
+
+        public void BindGameplay(PlayerController player, GameManager match)
+        {
+            Unsubscribe();
+            cookPlayer = player;
+            gameManager = match;
+            orderManager = gameManager != null ? gameManager.Orders : null;
+            preparationCanvas ??= GetComponentInParent<Canvas>();
+
+            List<string> missing = new List<string>();
+            if (cookPlayer == null)
+                missing.Add("Cook PlayerController (GameManager role binding)");
+            else if (cookPlayer.AssignedRole != PlayerRole.Cook)
+                missing.Add("PlayerController assigned to CookPreparationUI must have role Cook");
+            if (gameManager == null) missing.Add("GameManager");
+            if (orderManager == null) missing.Add("OrderManager (GameManager.Orders)");
+            if (recipeNameText == null) missing.Add("recipeNameText (Inspector)");
+            if (ingredientContent == null) missing.Add("ingredientContent (Inspector)");
+            if (ingredientIndicatorPrefab == null) missing.Add("ingredientIndicatorPrefab (Inspector)");
+            if (preparationCanvas == null) missing.Add("parent Canvas (CookPanel)");
+
+            if (missing.Count > 0)
             {
+                Debug.LogError($"CookPreparationUI cannot initialize. Missing or invalid: {string.Join(", ", missing)}.", this);
+                initialized = false;
+                ClearIndicators();
                 return;
             }
 
-            Unsubscribe();
+            if (preparationStatusText == null)
+            {
+                Debug.LogWarning(
+                    "CookPreparationUI has no preparationStatusText. Recipe name and status will share recipeNameText; assign a separate TMP_Text to show them independently.",
+                    this);
+            }
+
+            if (preparationMealboxRenderer == null)
+            {
+                Debug.LogWarning("CookPreparationUI has no preparationMealboxRenderer; mealbox progress color will not be shown.", this);
+            }
+
+            Camera cookCamera = cookPlayer.GetCamera();
+            if (cookCamera == null)
+            {
+                Debug.LogError("CookPreparationUI cannot bind because the Cook PlayerController has no Camera.", this);
+                initialized = false;
+                return;
+            }
+
+            preparationCanvas.renderMode = RenderMode.ScreenSpaceCamera;
+            preparationCanvas.worldCamera = cookCamera;
+            preparationCanvas.overrideSorting = true;
+            preparationCanvas.sortingOrder = 100;
+
+            initialized = true;
+            Subscribe();
+            Refresh();
         }
 
         private void Subscribe()
         {
-            if (cook != null)
+            if (cookPlayer != null)
             {
-                cook.PreparationChanged -= Refresh;
-                cook.PreparationChanged += Refresh;
+                cookPlayer.PreparationChanged -= Refresh;
+                cookPlayer.PreparationChanged += Refresh;
             }
 
-            if (GameManager.Instance != null && GameManager.Instance.Orders != null)
+            if (orderManager != null)
             {
-                GameManager.Instance.Orders.OrdersChanged -= Refresh;
-                GameManager.Instance.Orders.OrdersChanged += Refresh;
+                orderManager.OrdersChanged -= Refresh;
+                orderManager.OrdersChanged += Refresh;
             }
         }
 
         private void Unsubscribe()
         {
-            if (cook != null)
-            {
-                cook.PreparationChanged -= Refresh;
-            }
-
-            if (GameManager.Instance != null && GameManager.Instance.Orders != null)
-            {
-                GameManager.Instance.Orders.OrdersChanged -= Refresh;
-            }
+            if (cookPlayer != null)
+                cookPlayer.PreparationChanged -= Refresh;
+            if (orderManager != null)
+                orderManager.OrdersChanged -= Refresh;
         }
 
         private void Refresh()
         {
-            if (cook == null || ingredientContent == null)
-            {
+            if (!initialized || cookPlayer == null || orderManager == null)
                 return;
-            }
 
-            if (string.IsNullOrWhiteSpace(cook.SelectedOrderId) ||
-                GameManager.Instance == null ||
-                !GameManager.Instance.TryGetOrder(cook.SelectedOrderId, out OrderRecord order) ||
+            if (string.IsNullOrWhiteSpace(cookPlayer.SelectedOrderId) ||
+                !orderManager.TryGetOrder(cookPlayer.SelectedOrderId, out OrderRecord order) ||
                 order.State != OrderState.InPreparation)
             {
-                recipeNameText.text = string.Empty;
-                SetIngredientsVisible(true);
                 ClearIndicators();
-                bool preparationCompleted = !string.IsNullOrWhiteSpace(cook.PreparationMessage) &&
-                                            cook.PreparationMessage.IndexOf(
-                                                "pronto", StringComparison.OrdinalIgnoreCase) >= 0;
-                SetStatus(string.IsNullOrWhiteSpace(cook.PreparationMessage)
-                    ? "Selecione um pedido disponível no telefone."
-                    : cook.PreparationMessage);
-                SetMealboxColor(preparationCompleted ? completeColor : incompleteColor);
+                SetIngredientsVisible(true);
+                bool carryingMealbox = cookPlayer.CarriedPreparedMealbox != null;
+                string status = carryingMealbox
+                    ? "Marmita pronta — leve ao balcão."
+                    : string.IsNullOrWhiteSpace(cookPlayer.PreparationMessage)
+                        ? "Select an Order."
+                        : cookPlayer.PreparationMessage;
+                SetRecipeAndStatus(string.Empty, status);
+                SetMealboxColor(carryingMealbox ? completeColor : incompleteColor);
                 return;
             }
 
-            recipeNameText.text = order.DisplayName;
-
-            if (!cook.IsPreparationPresentationVisible)
+            if (!cookPlayer.IsPreparationPresentationVisible)
             {
                 ClearIndicators();
                 SetIngredientsVisible(false);
-                SetStatus($"A preparação do pedido #{order.OrderId} continua. O conteúdo foi preservado.");
+                SetRecipeAndStatus(order.DisplayName,
+                    $"A preparação do pedido #{order.OrderId} continua. O conteúdo foi preservado.");
                 SetMealboxColor(incompleteColor);
                 return;
             }
 
             SetIngredientsVisible(true);
-
             if (!string.Equals(renderedOrderId, order.OrderId, StringComparison.OrdinalIgnoreCase) ||
                 indicators.Count != order.RequiredIngredientIds.Count)
             {
@@ -136,7 +158,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             var actualCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (string actualId in cook.CurrentIngredientIds)
+            foreach (string actualId in cookPlayer.CurrentIngredientIds)
             {
                 if (!string.IsNullOrWhiteSpace(actualId))
                 {
@@ -146,7 +168,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             var requiredCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            bool exactContents = cook.CurrentIngredientIds.Count == order.RequiredIngredientIds.Count;
+            bool exactContents = cookPlayer.CurrentIngredientIds.Count == order.RequiredIngredientIds.Count;
             for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
             {
                 string requiredId = order.RequiredIngredientIds[i];
@@ -167,11 +189,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 exactContents &= actual.Value == requiredCount;
             }
 
-            bool correctLunchbox = cook.SelectedLunchboxType == order.LunchboxType;
+            bool correctLunchbox = cookPlayer.SelectedLunchboxType == order.LunchboxType;
             bool preparationComplete = exactContents && correctLunchbox;
             SetMealboxColor(preparationComplete ? completeColor : incompleteColor);
-            SetStatus(preparationComplete
-                ? "Receita correta — conclusão automática em andamento."
+            SetRecipeAndStatus(order.DisplayName, preparationComplete
+                ? "Receita correta — concluindo a marmita."
                 : !correctLunchbox
                     ? $"Selecione a marmita correta para o pedido #{order.OrderId}."
                     : $"Preparação do pedido #{order.OrderId}: ingredientes pendentes ou extras.");
@@ -183,7 +205,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
             renderedOrderId = order.OrderId;
             for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
             {
-                indicators.Add(Instantiate(ingredientIndicatorPrefab, ingredientContent));
+                KifomeOrderListUI indicator = Instantiate(ingredientIndicatorPrefab, ingredientContent);
+                if (indicator != null)
+                    indicators.Add(indicator);
             }
         }
 
@@ -192,29 +216,32 @@ namespace ColmeiaStudios.SoMaisUmPedido
             for (int i = indicators.Count - 1; i >= 0; i--)
             {
                 if (indicators[i] != null)
-                {
                     Destroy(indicators[i].gameObject);
-                }
             }
 
             indicators.Clear();
             renderedOrderId = null;
         }
 
-        private void SetMealboxColor(Color color)
-        {
-            if (preparationMealboxRenderer != null)
-            {
-                preparationMealboxRenderer.material.color = color;
-            }
-        }
-
-        private void SetStatus(string message)
+        private void SetRecipeAndStatus(string recipeName, string status)
         {
             if (preparationStatusText != null)
             {
-                preparationStatusText.text = message;
+                recipeNameText.text = recipeName;
+                preparationStatusText.text = status;
             }
+            else
+            {
+                recipeNameText.text = string.IsNullOrWhiteSpace(recipeName)
+                    ? status
+                    : $"{recipeName}\n{status}";
+            }
+        }
+
+        private void SetMealboxColor(Color color)
+        {
+            if (preparationMealboxRenderer != null)
+                preparationMealboxRenderer.material.color = color;
         }
 
         private void SetIngredientsVisible(bool visible)
