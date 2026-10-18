@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Ingredient_Meat
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.IngredientData
   id: 03
-  displayName: Carne
+  displayName: Meat
   value: 11
   color: {r: 0.3490566, g: 0.10560537, b: 0, a: 1}
   icon: {fileID: 0}

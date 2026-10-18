@@ -7,12 +7,20 @@ namespace ColmeiaStudios.SoMaisUmPedido
     public sealed class DailyMatchResult
     {
         public DailyMatchResult(int day, int deliveries, int deliveryGoal, int expiredOrders, float closingBalance, int reputation)
+            : this(day, deliveries, deliveryGoal, expiredOrders, closingBalance, closingBalance, 0f, reputation)
+        {
+        }
+
+        public DailyMatchResult(int day, int deliveries, int deliveryGoal, int expiredOrders,
+            float openingBalance, float closingBalance, float moneyEarned, int reputation)
         {
             Day = day;
             Deliveries = deliveries;
             DeliveryGoal = deliveryGoal;
             ExpiredOrders = expiredOrders;
+            OpeningBalance = openingBalance;
             ClosingBalance = closingBalance;
+            MoneyEarned = moneyEarned;
             Reputation = reputation;
         }
 
@@ -20,7 +28,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public int Deliveries { get; }
         public int DeliveryGoal { get; }
         public int ExpiredOrders { get; }
+        public float OpeningBalance { get; }
         public float ClosingBalance { get; }
+        public float MoneyEarned { get; }
+        public float BalanceChange => ClosingBalance - OpeningBalance;
+        public bool GoalReached => Deliveries >= DeliveryGoal;
         public int Reputation { get; }
     }
 
@@ -29,7 +41,19 @@ namespace ColmeiaStudios.SoMaisUmPedido
         NotStarted,
         Working,
         DayEnded,
-        Transitioning
+        ResultsWaiting,
+        RoleSwapVoting,
+        RoleSwapCountdown,
+        RoleSwapResult,
+        Transitioning,
+        GameOver
+    }
+
+    public enum RoleSwapVote
+    {
+        Pending,
+        Yes,
+        No
     }
 
     public class GameManager : MonoBehaviour
@@ -75,6 +99,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private float transitionElapsed;
         private int dailyDeliveryGoal = 7;
         private int completedDailyDeliveries;
+        private float openingBalance;
+        private float dailyMoneyEarned;
+        private float voteCountdownRemaining;
+        private int lastRoleSwapVoteDay;
+        private bool lastRoleSwapSucceeded;
         private PlayerRole lastBoundPlayerOneRole;
         private PlayerRole lastBoundPlayerTwoRole;
         private bool roleBindingsInitialized;
@@ -82,6 +111,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public event Action MatchStateChanged;
         public event Action ClockChanged;
         public event Action MatchCycleChanged;
+        public event Action GameOver;
 
         public MatchConfig MatchConfiguration => matchConfig;
         public OrderManager Orders => orderManager;
@@ -93,12 +123,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public int Reputation => reputation;
         public int DailyDeliveryGoal => dailyDeliveryGoal;
         public int CompletedDailyDeliveries => completedDailyDeliveries;
+        public float DailyMoneyEarned => dailyMoneyEarned;
         public int CurrentDay => currentDay;
         public IReadOnlyList<DailyMatchResult> DailyResults => dailyResults;
         public MatchCycleState CycleState => cycleState;
-        public bool IsDayComplete => cycleState == MatchCycleState.DayEnded ||
-                                     cycleState == MatchCycleState.Transitioning;
+        public bool IsDayComplete => currentDay > 0 && cycleState != MatchCycleState.Working &&
+                                     cycleState != MatchCycleState.NotStarted;
         public bool IsWorkDayActive => cycleState == MatchCycleState.Working;
+        public bool IsGameOver => cycleState == MatchCycleState.GameOver;
+        public RoleSwapVote PlayerOneRoleSwapVote { get; private set; } = RoleSwapVote.Pending;
+        public RoleSwapVote PlayerTwoRoleSwapVote { get; private set; } = RoleSwapVote.Pending;
+        public float RoleSwapCountdownRemaining => voteCountdownRemaining;
+        public bool LastRoleSwapSucceeded => lastRoleSwapSucceeded;
+        public bool IsRoleSwapVoteActive => cycleState == MatchCycleState.RoleSwapVoting ||
+                                            cycleState == MatchCycleState.RoleSwapCountdown;
+        public DailyMatchResult LatestDailyResult => dailyResults.Count > 0 ? dailyResults[dailyResults.Count - 1] : null;
         public float DayDurationSeconds => Mathf.Max(0f, (endHour - startHour) * secondsPerHour);
 
         public string ClockText
@@ -185,14 +224,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             RefreshRoleBindingsIfChanged();
 
-            if (cycleState == MatchCycleState.DayEnded)
-            {
-                cycleState = MatchCycleState.Transitioning;
-                transitionElapsed = 0f;
-                MatchCycleChanged?.Invoke();
-                return;
-            }
-
             if (cycleState == MatchCycleState.Transitioning)
             {
                 float transitionDuration = matchConfig != null ? matchConfig.NextDayTransitionSeconds : 5f;
@@ -200,6 +231,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 if (transitionElapsed >= transitionDuration)
                 {
                     BeginNextDay();
+                }
+
+                return;
+            }
+
+            if (cycleState == MatchCycleState.RoleSwapCountdown)
+            {
+                if (Time.timeScale > 0f)
+                {
+                    voteCountdownRemaining = Mathf.Max(0f, voteCountdownRemaining - Time.unscaledDeltaTime);
+                }
+
+                if (voteCountdownRemaining <= 0f)
+                {
+                    ResolveRoleSwapVote();
                 }
 
                 return;
@@ -236,6 +282,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             currentDay++;
             elapsedSeconds = 0f;
             completedDailyDeliveries = 0;
+            dailyMoneyEarned = 0f;
+            openingBalance = balance;
             isDayComplete = false;
             cycleState = MatchCycleState.Working;
             nextClockNotification = 1f;
@@ -259,23 +307,151 @@ namespace ColmeiaStudios.SoMaisUmPedido
             BeginDay();
         }
 
+        public void ContinueAfterDailyResults()
+        {
+            if (cycleState != MatchCycleState.ResultsWaiting || reputation <= 0)
+                return;
+
+            bool isRoleSwapMilestone = currentDay <= 25 && currentDay % 5 == 0;
+            if (isRoleSwapMilestone && lastRoleSwapVoteDay != currentDay)
+            {
+                PlayerOneRoleSwapVote = RoleSwapVote.Pending;
+                PlayerTwoRoleSwapVote = RoleSwapVote.Pending;
+                voteCountdownRemaining = 0f;
+                cycleState = MatchCycleState.RoleSwapVoting;
+                MatchCycleChanged?.Invoke();
+                return;
+            }
+
+            BeginTransitionToNextDay();
+        }
+
+        public bool SetRoleSwapVote(int playerSlot, bool wantsSwap)
+        {
+            if (!IsRoleSwapVoteActive || (playerSlot != 1 && playerSlot != 2))
+                return false;
+
+            RoleSwapVote choice = wantsSwap ? RoleSwapVote.Yes : RoleSwapVote.No;
+            if (playerSlot == 1)
+                PlayerOneRoleSwapVote = choice;
+            else
+                PlayerTwoRoleSwapVote = choice;
+
+            if (cycleState == MatchCycleState.RoleSwapVoting &&
+                PlayerOneRoleSwapVote != RoleSwapVote.Pending &&
+                PlayerTwoRoleSwapVote != RoleSwapVote.Pending)
+            {
+                voteCountdownRemaining = 3f;
+                cycleState = MatchCycleState.RoleSwapCountdown;
+            }
+
+            MatchCycleChanged?.Invoke();
+            return true;
+        }
+
+        public bool ToggleRoleSwapVote(PlayerController player)
+        {
+            if (!IsRoleSwapVoteActive || player == null)
+                return false;
+
+            if (player == playerOne && PlayerOneRoleSwapVote != RoleSwapVote.Pending)
+                return SetRoleSwapVote(1, PlayerOneRoleSwapVote != RoleSwapVote.Yes);
+            if (player == playerTwo && PlayerTwoRoleSwapVote != RoleSwapVote.Pending)
+                return SetRoleSwapVote(2, PlayerTwoRoleSwapVote != RoleSwapVote.Yes);
+
+            return false;
+        }
+
+        public void ContinueAfterRoleSwapResult()
+        {
+            if (cycleState != MatchCycleState.RoleSwapResult || reputation <= 0)
+                return;
+
+            BeginTransitionToNextDay();
+        }
+
+        private void ResolveRoleSwapVote()
+        {
+            if (cycleState != MatchCycleState.RoleSwapCountdown)
+                return;
+
+            lastRoleSwapSucceeded = PlayerOneRoleSwapVote == RoleSwapVote.Yes &&
+                                    PlayerTwoRoleSwapVote == RoleSwapVote.Yes;
+            if (lastRoleSwapSucceeded && !SwapPlayerRoles())
+                lastRoleSwapSucceeded = false;
+
+            lastRoleSwapVoteDay = currentDay;
+            cycleState = MatchCycleState.RoleSwapResult;
+            MatchCycleChanged?.Invoke();
+            MatchStateChanged?.Invoke();
+        }
+
+        private bool SwapPlayerRoles()
+        {
+            if (playerOne == null || playerTwo == null ||
+                playerOne.AssignedRole == playerTwo.AssignedRole ||
+                GetSpawnPointForRole(playerOne.AssignedRole == PlayerRole.Cook ? PlayerRole.Delivery : PlayerRole.Cook) == null ||
+                GetSpawnPointForRole(playerTwo.AssignedRole == PlayerRole.Cook ? PlayerRole.Delivery : PlayerRole.Cook) == null)
+            {
+                Debug.LogError("Não foi possível trocar as funções: verifique os jogadores e os pontos Cook Spawn/Delivery Spawn.", this);
+                return false;
+            }
+
+            PlayerRole newPlayerOneRole = playerOne.AssignedRole == PlayerRole.Cook
+                ? PlayerRole.Delivery
+                : PlayerRole.Cook;
+            PlayerRole newPlayerTwoRole = playerTwo.AssignedRole == PlayerRole.Cook
+                ? PlayerRole.Delivery
+                : PlayerRole.Cook;
+            Transform playerOneRoleSpawn = GetSpawnPointForRole(newPlayerOneRole);
+            Transform playerTwoRoleSpawn = GetSpawnPointForRole(newPlayerTwoRole);
+
+            // Update role data only. The existing PlayerInput pairings remain with their player slots.
+            playerOne.SetRoleForRotation(newPlayerOneRole);
+            playerTwo.SetRoleForRotation(newPlayerTwoRole);
+            MatchSettings.SetRoles(newPlayerOneRole, newPlayerTwoRole);
+            playerOne.transform.SetPositionAndRotation(playerOneRoleSpawn.position, playerOneRoleSpawn.rotation);
+            playerTwo.transform.SetPositionAndRotation(playerTwoRoleSpawn.position, playerTwoRoleSpawn.rotation);
+            RefreshRoleAssignments();
+            MatchStateChanged?.Invoke();
+            return true;
+        }
+
+        private void BeginTransitionToNextDay()
+        {
+            if (cycleState != MatchCycleState.ResultsWaiting && cycleState != MatchCycleState.RoleSwapResult)
+                return;
+
+            cycleState = MatchCycleState.Transitioning;
+            transitionElapsed = 0f;
+            MatchCycleChanged?.Invoke();
+        }
+
         private void EndWorkDay()
         {
             if (cycleState != MatchCycleState.Working)
                 return;
 
-            cycleState = MatchCycleState.DayEnded;
+            // Move out of Working before notifications/penalties so repeated callbacks cannot close twice.
+            cycleState = MatchCycleState.ResultsWaiting;
             isDayComplete = true;
             orderManager?.EndDay();
             int delivered = completedDailyDeliveries;
             int expired = 0;
             orderManager?.GetDayOrderCounts(currentDay, out delivered, out expired);
+            if (delivered < dailyDeliveryGoal)
+            {
+                SetReputation(reputation - 1);
+            }
+
             dailyResults.Add(new DailyMatchResult(
                 currentDay,
                 delivered,
                 dailyDeliveryGoal,
                 expired,
+                openingBalance,
                 balance,
+                dailyMoneyEarned,
                 reputation));
             foreach (PlayerController player in GetPlayers())
             {
@@ -285,6 +461,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
             MatchCycleChanged?.Invoke();
             MatchStateChanged?.Invoke();
             ClockChanged?.Invoke();
+            if (reputation <= 0)
+            {
+                cycleState = MatchCycleState.GameOver;
+                MatchCycleChanged?.Invoke();
+                GameOver?.Invoke();
+            }
         }
 
         private IEnumerable<PlayerController> GetPlayers()
@@ -598,6 +780,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             paidOrderIds.Add(order.OrderId);
             balance = updatedBalance;
+            dailyMoneyEarned += total;
             completedDailyDeliveries++;
 
             MatchStateChanged?.Invoke();

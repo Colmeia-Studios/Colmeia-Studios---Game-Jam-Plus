@@ -14,5 +14,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.HouseData
   id: 03
   customerName: Pedro
-  description: casala
+  description: Green house with a fence
   houseImage: {fileID: 0}

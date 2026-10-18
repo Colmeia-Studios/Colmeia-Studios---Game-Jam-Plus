@@ -90,6 +90,51 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public MealboxPhysical CarriedPreparedMealbox => carriedPreparedMealbox;
         public MealboxPhysical PreparationMealbox => preparationMealbox;
 
+        public void SetRoleForRotation(PlayerRole role)
+        {
+            if (role != PlayerRole.Cook && role != PlayerRole.Delivery)
+            {
+                Debug.LogError($"Cannot assign invalid player role '{role}' to {name}.", this);
+                return;
+            }
+
+            assignedRole = role;
+            kifomePhone?.SetMousePointerEnabled(UsesMouseAndKeyboard);
+        }
+
+        public bool WasRoleVoteTogglePressedThisFrame()
+        {
+            if (playerInput == null || !playerInput.user.valid)
+                return false;
+
+            if (controlScheme == "Gamepad")
+                return cancelAction != null && cancelAction.WasPressedThisFrame();
+
+            // Read only the devices paired to this PlayerInput. This keeps each slot's
+            // vote independent even when the machine has other keyboards/mice connected.
+            foreach (InputDevice pairedDevice in playerInput.user.pairedDevices)
+            {
+                if (pairedDevice is Keyboard keyboard && keyboard.bKey.wasPressedThisFrame)
+                    return true;
+                if (pairedDevice is Mouse mouse && mouse.rightButton.wasPressedThisFrame)
+                    return true;
+            }
+
+            return false;
+        }
+
+        public bool WasRoleVoteYesPressedThisFrame()
+        {
+            return playerInput != null && playerInput.user.valid &&
+                   confirmAction != null && confirmAction.WasPressedThisFrame();
+        }
+
+        public bool WasRoleVoteNoPressedThisFrame()
+        {
+            return playerInput != null && playerInput.user.valid &&
+                   cancelAction != null && cancelAction.WasPressedThisFrame();
+        }
+
         private void Awake()
         {
             characterController = GetComponent<CharacterController>();
@@ -343,6 +388,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Update()
         {
+            if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            {
+                velocity = Vector3.zero;
+                return;
+            }
+
             if (playerInput == null || playerInput.actions == null)
             {
                 return;

@@ -16,37 +16,76 @@ MonoBehaviour:
   playerTwo: {fileID: 11400000, guid: c720880547332c70987bf9ee5aac6a1d, type: 2}
   orderCatalog:
   - {fileID: 11400000, guid: 9e86f23d8052f86b082b7d8ac900ee17, type: 2}
+  - {fileID: 11400000, guid: 8e92fb774ed281e4881f4cc1cb2d995f, type: 2}
+  - {fileID: 11400000, guid: fdf88cd5187d1c21fb516edfb4dd9224, type: 2}
+  - {fileID: 11400000, guid: 618ab15faec0ff31985f836be5ad6d46, type: 2}
   houseCatalog:
+  - {fileID: 11400000, guid: 9edd9bc29a8546d55b9255f94b681b01, type: 2}
+  - {fileID: 11400000, guid: bb9625527af66f89396406e427e60cec, type: 2}
+  - {fileID: 11400000, guid: e6fd4edbe2341ef4bae213404f1c9691, type: 2}
+  - {fileID: 11400000, guid: 240832c8448fa3b78a6c066eca8a198f, type: 2}
+  - {fileID: 11400000, guid: bcbe4a9ee6cb407c49b63eb016e7a2f4, type: 2}
+  - {fileID: 11400000, guid: 16177ce4ddbf8ac8ba20a4ac68e77d23, type: 2}
+  - {fileID: 11400000, guid: d54d163c2e7a69e8bb53dae9bd5efdbc, type: 2}
+  - {fileID: 11400000, guid: b5392c83903335a489df6152212af47b, type: 2}
+  - {fileID: 11400000, guid: e2ebff925c85edd6fa5b35aceb24bcfc, type: 2}
+  - {fileID: 11400000, guid: 1b27c07df6b18d7cfa8132abed43a8cd, type: 2}
+  - {fileID: 11400000, guid: 29dd4daaec88f4f8cb47f3207056e397, type: 2}
+  - {fileID: 11400000, guid: 97a8d5378c36348e78b5a3451b2d9363, type: 2}
+  - {fileID: 11400000, guid: 64438dd5d8fd4e445af35032360f147c, type: 2}
+  - {fileID: 11400000, guid: bd0b9de022a22465fb5a7c269f06f22b, type: 2}
+  - {fileID: 11400000, guid: 69def9ab58360908988692476f4f79e3, type: 2}
+  - {fileID: 11400000, guid: b89cd4afeaca6b1c1825e67e9def8351, type: 2}
+  - {fileID: 11400000, guid: 27ff3ea4cafb87a918a433c76dc98647, type: 2}
+  - {fileID: 11400000, guid: 61f4ced1b919be5c6a6fa15a1b0bdff2, type: 2}
+  - {fileID: 11400000, guid: f18af4069efd1b3448df8c9283591e69, type: 2}
+  - {fileID: 11400000, guid: 34b09a73978a12c34982617316579d09, type: 2}
+  - {fileID: 11400000, guid: 51ae49beeb99fcc0daddc05e38089748, type: 2}
+  - {fileID: 11400000, guid: 567f47ae1d83bf9ccb95360da4f5d644, type: 2}
   - {fileID: 11400000, guid: 7e967a43bfd93d8f6a3596712ac633a6, type: 2}
   - {fileID: 11400000, guid: d9f89b66bb934d4079d6c92928a7b4cd, type: 2}
   - {fileID: 11400000, guid: 87123c5c3487169aa96d2b07b8dbd536, type: 2}
+  - {fileID: 11400000, guid: 3c58d8b908353eb31b73428339f38d11, type: 2}
+  - {fileID: 11400000, guid: 6144571f2ad487cddb3e0f878170f1ee, type: 2}
   maximumActiveOrders: 5
   orderGenerationIntervalSeconds: 8
-  orderDeadlineSeconds: 120
+  orderDeadlineSeconds: 100
   ingredientUnlocks:
-  - ingredient: {fileID: 11400000, guid: e62d9d15d7683220dbe726d3a2bf76ff, type: 2}
-    availableFromDay: 1
   - ingredient: {fileID: 11400000, guid: d77cbdd97b1ed70aa900f7fb90b8bbf4, type: 2}
+    availableFromDay: 5
+  - ingredient: {fileID: 11400000, guid: dcd0bb72d2c54041fb3f546c6467592f, type: 2}
+    availableFromDay: 5
+  - ingredient: {fileID: 11400000, guid: 38070c01e3f50c8bc898439c4c85d5b7, type: 2}
+    availableFromDay: 1
+  - ingredient: {fileID: 11400000, guid: 5229ec50fd15e8d2ca7fcc041ba2b2a6, type: 2}
     availableFromDay: 1
   - ingredient: {fileID: 11400000, guid: 02a7ed3c7d96351dc8cac5eb5ebcfc69, type: 2}
+    availableFromDay: 5
+  - ingredient: {fileID: 11400000, guid: 9923762c7362b6c8b9576ad77fef71f3, type: 2}
+    availableFromDay: 5
+  - ingredient: {fileID: 11400000, guid: e62d9d15d7683220dbe726d3a2bf76ff, type: 2}
+    availableFromDay: 1
+  - ingredient: {fileID: 11400000, guid: 5b7ca3693929c6131a7d1473a6878ce2, type: 2}
+    availableFromDay: 15
+  - ingredient: {fileID: 11400000, guid: 5ce23890219d343d2a14c68f93820cc4, type: 2}
     availableFromDay: 1
   - ingredient: {fileID: 11400000, guid: e2b278f6618ee79219d60aea1dd394a8, type: 2}
-    availableFromDay: 1
+    availableFromDay: 15
   lunchboxUnlocks:
   - lunchboxType: 4
     availableFromDay: 1
   - lunchboxType: 0
     availableFromDay: 1
   - lunchboxType: 1
-    availableFromDay: 1
+    availableFromDay: 5
   - lunchboxType: 2
-    availableFromDay: 1
+    availableFromDay: 5
   - lunchboxType: 3
-    availableFromDay: 1
+    availableFromDay: 15
   startHour: 11
   endHour: 19
-  realSecondsPerGameHour: 40
-  nextDayTransitionSeconds: 5
-  startingBalance: 500
+  realSecondsPerGameHour: 30
+  nextDayTransitionSeconds: 1
+  startingBalance: 50
   startingReputation: 5
-  dailyDeliveryGoal: 7
+  dailyDeliveryGoal: 10

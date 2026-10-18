@@ -328,11 +328,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
                         card.playerLabel.text = selected
                             ? "PLAYER 1"
                             : "PLAYER 2";
+                        
+                        
+                        if (card.ready != null)
+                            card.ready.SetActive(true);
                     }
                 }
 
-                if (card.ready != null)
-                    card.ready.SetActive(true);
 
                 RefreshDeviceVisual(i, card);
             }

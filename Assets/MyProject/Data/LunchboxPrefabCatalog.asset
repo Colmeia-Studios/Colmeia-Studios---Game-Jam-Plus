@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 14d0a5564d8e41e9b41aec26c519f123, type: 3}
   m_Name: LunchboxPrefabCatalog
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.LunchboxPrefabCatalog
-  emptyOneCompartment: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
-  emptyTwoCompartments: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
-  emptyThreeCompartments: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
-  emptyFourCompartments: {fileID: 6251274948289739706, guid: bdeac594b92179f138ef1472de60df27, type: 3}
-  emptyFiveCompartments: {fileID: 6251274948289739706, guid: 06f786db6ee8234d8b1a0bc372a771de, type: 3}
-  closedMealboxA: {fileID: 5118906551980224946, guid: c18c911dc802b0740866da60d467b22d, type: 3}
-  closedMealboxB: {fileID: 2921154933895940338, guid: 4234bb29d84dca3a0a229a84fedd53ea, type: 3}
+  emptyOneCompartment: {fileID: 1712620276104364727, guid: c0baf0f8900c36351b73531d2dde0668, type: 3}
+  emptyTwoCompartments: {fileID: 8963723499929881680, guid: 668d932f84a637bcc8ee6e2052899a68, type: 3}
+  emptyThreeCompartments: {fileID: 3519513905491649053, guid: 21d966f2876d6c5f3b7f92045bc8d229, type: 3}
+  emptyFourCompartments: {fileID: 9517700110228969, guid: 5069763d63ea55dcd8707cee5f0c0311, type: 3}
+  emptyFiveCompartments: {fileID: 4249359011487630699, guid: d91b40f993becaaf7b04c864a24b5000, type: 3}
+  closedMealboxA: {fileID: 8445259948000937042, guid: 2c18802816114a78aa78df866d3e6d8b, type: 3}
+  closedMealboxB: {fileID: 8445259948000937042, guid: 2c18802816114a78aa78df866d3e6d8b, type: 3}

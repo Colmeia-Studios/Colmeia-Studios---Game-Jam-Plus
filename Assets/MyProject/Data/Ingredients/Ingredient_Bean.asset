@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Ingredient_Bean
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.IngredientData
   id: 02
-  displayName: "Feij\xE3o"
+  displayName: Bean
   value: 8
   color: {r: 0, g: 0, b: 0, a: 1}
   icon: {fileID: 0}

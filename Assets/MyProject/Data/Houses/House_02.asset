@@ -13,6 +13,6 @@ MonoBehaviour:
   m_Name: House_02
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.HouseData
   id: 02
-  customerName: Maria
-  description: casala
+  customerName: "Jer\xF4nimo"
+  description: Gray house with a fence
   houseImage: {fileID: 0}
