@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -59,9 +61,17 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private readonly PlayerDevice[] players = { new PlayerDevice(), new PlayerDevice() };
         private readonly List<Gamepad> connectedPadsInOrder = new List<Gamepad>();
+        private readonly Dictionary<Transform, DeviceIconInstance> deviceIcons =
+            new Dictionary<Transform, DeviceIconInstance>();
         private PlayerRole? firstCharacter;
         private bool initialized;
         private bool lastValidity;
+
+        private sealed class DeviceIconInstance
+        {
+            public GameObject prefab;
+            public GameObject instance;
+        }
 
         private void Awake() => ConfigureButtons();
 
@@ -71,6 +81,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Start()
         {
+            EnsureMenuPointerReady();
             foreach (Gamepad gamepad in Gamepad.all)
                 TrackConnectedGamepad(gamepad);
             LogDeviceSnapshot("inicialização");
@@ -79,6 +90,32 @@ namespace ColmeiaStudios.SoMaisUmPedido
             lastValidity = DevicesValid(out _);
             RefreshUI();
             LogAssignment("atribuição inicial");
+        }
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (hasFocus) EnsureMenuPointerReady();
+        }
+
+        private void EnsureMenuPointerReady()
+        {
+            SetMenuCursor();
+            // Use the scene EventSystem if present; never spawn a second one.
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem == null)
+            {
+                Debug.LogWarning("CharacterSelectionManager: no EventSystem in the scene; mouse UI clicks will not work.", this);
+                return;
+            }
+            if (eventSystem.GetComponent<InputSystemUIInputModule>() == null &&
+                eventSystem.GetComponent<BaseInputModule>() == null)
+                Debug.LogWarning("CharacterSelectionManager: EventSystem has no UI input module for pointer clicks.", this);
+        }
+
+        private static void SetMenuCursor()
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
         }
 
         private void Update()
@@ -121,24 +158,56 @@ namespace ColmeiaStudios.SoMaisUmPedido
             Keyboard keyboard = Keyboard.current != null && Keyboard.current.added ? Keyboard.current : null;
             Mouse mouse = Mouse.current != null && Mouse.current.added ? Mouse.current : null;
             bool keyboardMouseAvailable = keyboard != null && mouse != null;
-            if (keyboardMouseAvailable)
-                AssignKeyboardMouse(0, keyboard, mouse);
+            List<Gamepad> pads = GetConnectedGamepadsInConnectionOrder();
 
-            List<Gamepad> pads = connectedPadsInOrder.Where(pad => pad != null && pad.added).ToList();
+            // Priority 1: two independent keyboard+mouse pairs (only when the project supports it).
+            if (SupportsTwoIndependentKeyboardMousePairs(out Keyboard secondKeyboard, out Mouse secondMouse))
+            {
+                AssignKeyboardMouse(0, keyboard, mouse);
+                AssignKeyboardMouse(1, secondKeyboard, secondMouse);
+                return;
+            }
+
+            // Priority 2: Player 1 keyboard+mouse, Player 2 first valid gamepad.
+            if (keyboardMouseAvailable && pads.Count > 0)
+            {
+                AssignKeyboardMouse(0, keyboard, mouse);
+                AssignGamepad(1, pads[0]);
+                return;
+            }
+
+            // Priority 3: first and second valid gamepads when mixed pairing is unavailable.
             if (pads.Count >= 2)
             {
-                // Initial choice only: retain keyboard/mouse as P1's alternate controls.
-                AssignGamepad(0, pads[0], keyboardMouseAvailable ? keyboard : null,
-                    keyboardMouseAvailable ? mouse : null);
+                AssignGamepad(0, pads[0]);
                 AssignGamepad(1, pads[1]);
+                return;
             }
+
+            // Partial real assignments only — never invent a second device.
+            if (keyboardMouseAvailable)
+                AssignKeyboardMouse(0, keyboard, mouse);
             else if (pads.Count == 1)
-            {
-                if (keyboardMouseAvailable)
-                    AssignGamepad(1, pads[0]);
-                else
-                    AssignGamepad(0, pads[0]);
-            }
+                AssignGamepad(0, pads[0]);
+        }
+
+        /// <summary>
+        /// Dual keyboard/mouse is not supported: Unity exposes one shared keyboard/mouse pair,
+        /// MatchSettings has no PlayerTwoKeyboard, and GameManager pairs Player 2 without a keyboard.
+        /// </summary>
+        private static bool SupportsTwoIndependentKeyboardMousePairs(out Keyboard secondKeyboard, out Mouse secondMouse)
+        {
+            secondKeyboard = null;
+            secondMouse = null;
+            return false;
+        }
+
+        private List<Gamepad> GetConnectedGamepadsInConnectionOrder()
+        {
+            var seenDeviceIds = new HashSet<int>();
+            return connectedPadsInOrder
+                .Where(pad => pad != null && pad.added && seenDeviceIds.Add(pad.deviceId))
+                .ToList();
         }
 
         private void DetectGamepadInput()
@@ -247,7 +316,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void TrackConnectedGamepad(Gamepad pad)
         {
-            if (pad != null && pad.added && !connectedPadsInOrder.Contains(pad)) connectedPadsInOrder.Add(pad);
+            if (pad != null && pad.added &&
+                !connectedPadsInOrder.Any(existing => existing != null && existing.deviceId == pad.deviceId))
+                connectedPadsInOrder.Add(pad);
         }
 
         private bool DevicesValid(out string reason)
@@ -296,8 +367,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 CharacterCard card = cards[i];
                 bool selected = firstCharacter.HasValue && firstCharacter.Value == card.role;
-                if (card.playerLabel != null) card.playerLabel.text = !firstCharacter.HasValue ? "Choose a character" : selected ? "PLAYER 1" : "PLAYER 2";
+                // playerLabel only ever shows player identity — never device names.
+                if (card.playerLabel != null)
+                    card.playerLabel.text = !firstCharacter.HasValue
+                        ? "Choose a character"
+                        : selected ? "PLAYER 1" : "PLAYER 2";
                 if (card.ready != null) card.ready.SetActive(selected);
+                // First selected character is Player 1; the remaining card is Player 2.
                 int playerIndex = firstCharacter.HasValue && !selected ? 1 : 0;
                 RefreshDeviceVisual(playerIndex, card);
             }
@@ -322,53 +398,83 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void RefreshDeviceVisual(int playerIndex, CharacterCard card)
         {
-            if (card.deviceIconContainer == null) return;
-            for (int i = card.deviceIconContainer.childCount - 1; i >= 0; i--)
-                Destroy(card.deviceIconContainer.GetChild(i).gameObject);
-            if (!firstCharacter.HasValue)
+            // Before character selection, cards stay neutral (no device icon mapping).
+            PlayerDevice player = firstCharacter.HasValue ? players[playerIndex] : null;
+            string visualScheme = null;
+            string deviceText = "";
+            if (player != null && player.primary is Gamepad)
             {
-                if (card.deviceLabel != null) card.deviceLabel.text = "";
+                // Hybrid GamepadKeyboardMouse still shows only the primary Gamepad prefab.
+                visualScheme = "Gamepad";
+                deviceText = player.keyboard != null && player.mouse != null
+                    ? $"Primary: {player.primary.displayName}\nAlternate: Keyboard + Mouse"
+                    : $"Primary: {player.primary.displayName}";
+            }
+            else if (player != null && player.scheme == "KeyboardMouse")
+            {
+                visualScheme = "KeyboardMouse";
+                deviceText = "Primary: Keyboard + Mouse";
+            }
+
+            if (card.deviceLabel != null) card.deviceLabel.text = deviceText;
+
+            if (card.deviceIconContainer == null) return;
+            // Exactly one icon prefab (or none). Never instantiate a second icon for alternates.
+            GameObject desiredPrefab = GetDeviceVisualPrefab(visualScheme);
+            RefreshSingleDeviceIcon(card.deviceIconContainer, desiredPrefab);
+        }
+
+        private GameObject GetDeviceVisualPrefab(string scheme)
+        {
+            if (string.IsNullOrEmpty(scheme)) return null;
+            DeviceVisual visual = deviceVisuals?.FirstOrDefault(item => item != null && item.scheme == scheme);
+            return visual != null ? visual.prefab : null;
+        }
+
+        private void RefreshSingleDeviceIcon(Transform container, GameObject desiredPrefab)
+        {
+            deviceIcons.TryGetValue(container, out DeviceIconInstance current);
+            if (desiredPrefab != null && current != null && current.instance != null &&
+                current.prefab == desiredPrefab && current.instance.transform.parent == container)
+            {
+                // Keep the existing icon and strip any leftover siblings.
+                RemoveExtraDeviceIcons(container, current.instance.transform);
                 return;
             }
 
-            PlayerDevice player = players[playerIndex];
-            var labels = new List<string>();
-            if (player.primary is Gamepad)
+            // Always clear previous visuals before creating a replacement.
+            ClearDeviceIcons(container);
+            deviceIcons.Remove(container);
+            if (desiredPrefab == null) return;
+
+            GameObject instance = Instantiate(desiredPrefab, container, false);
+            RemoveExtraDeviceIcons(container, instance.transform);
+            deviceIcons[container] = new DeviceIconInstance { prefab = desiredPrefab, instance = instance };
+        }
+
+        private void RemoveExtraDeviceIcons(Transform container, Transform keep)
+        {
+            for (int i = container.childCount - 1; i >= 0; i--)
             {
-                AddVisual(card.deviceIconContainer, "Gamepad");
-                labels.Add($"Primary: {player.primary.displayName}");
-                if (player.keyboard != null && player.mouse != null)
-                {
-                    AddVisual(card.deviceIconContainer, "KeyboardMouse");
-                    labels.Add("Alternate: Keyboard + Mouse");
-                }
-            }
-            else if (player.scheme == "KeyboardMouse")
-            {
-                AddVisual(card.deviceIconContainer, "KeyboardMouse");
-                labels.Add("Primary: Keyboard + Mouse");
-            }
-            string deviceText = string.Join("\n", labels);
-            if (card.deviceLabel != null)
-            {
-                card.deviceLabel.text = deviceText;
-            }
-            else if (card.playerLabel != null && firstCharacter.HasValue)
-            {
-                // The current CharacterSelection scene has no separate device-label
-                // object assigned. Keep the existing player label useful instead of
-                // silently omitting the actual assigned device from the card.
-                string slotLabel = playerIndex == 0 ? "PLAYER 1" : "PLAYER 2";
-                card.playerLabel.text = string.IsNullOrEmpty(deviceText)
-                    ? slotLabel
-                    : $"{slotLabel}\n{deviceText}";
+                Transform child = container.GetChild(i);
+                if (child != keep) RemoveDeviceIcon(child.gameObject);
             }
         }
 
-        private void AddVisual(Transform container, string scheme)
+        private void ClearDeviceIcons(Transform container)
         {
-            DeviceVisual visual = deviceVisuals?.FirstOrDefault(item => item != null && item.scheme == scheme);
-            if (visual?.prefab != null) Instantiate(visual.prefab, container);
+            for (int i = container.childCount - 1; i >= 0; i--)
+                RemoveDeviceIcon(container.GetChild(i).gameObject);
+        }
+
+        private void RemoveDeviceIcon(GameObject icon)
+        {
+            if (icon == null) return;
+            // Destroy is deferred by Unity. Hide and detach first so an old icon is never
+            // visible or counted as a child while the replacement is instantiated.
+            icon.SetActive(false);
+            icon.transform.SetParent(null, false);
+            Destroy(icon);
         }
 
         private void StartMatch()

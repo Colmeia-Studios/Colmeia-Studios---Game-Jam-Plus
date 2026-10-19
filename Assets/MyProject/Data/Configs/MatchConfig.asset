@@ -101,6 +101,6 @@ MonoBehaviour:
   nextDayTransitionSeconds: 1
   startingBalance: 50
   startingReputation: 1
-  dailyDeliveryGoal: 10
-  lastCampaignDay: 10
-  roleSwapIntervalDays: 5
+  dailyDeliveryGoal: 1
+  lastCampaignDay: 2
+  roleSwapIntervalDays: 1

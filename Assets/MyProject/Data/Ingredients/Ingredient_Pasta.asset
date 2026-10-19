@@ -17,4 +17,4 @@ MonoBehaviour:
   value: 5
   color: {r: 0, g: 0, b: 0, a: 1}
   icon: {fileID: 0}
-  visualPrefab: {fileID: 1807466582482717259, guid: 31db90a798345ef419a30aac12002d09, type: 3}
+  visualPrefab: {fileID: 171096743152318845, guid: a4845edf3eafb3f4aaf259cf77e16c42, type: 3}

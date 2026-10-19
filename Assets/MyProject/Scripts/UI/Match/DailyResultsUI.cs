@@ -90,8 +90,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
             SetText(deliveriesText,$"{result.Deliveries} Deliveries Done");
             SetText(goalText, $"Delivery Goal: {result.Deliveries}/{result.DeliveryGoal}");
             SetText(goalStatusText, result.GoalReached ? "Goal Reached" : "Goal Not Reached");
-            SetText(moneyEarnedText, $"R$ {result.MoneyEarned:0.00}");
-            SetText(closingBalanceText, $"R$ {result.ClosingBalance:0.00}");
+            SetText(moneyEarnedText, $"{result.MoneyEarned:0.00}");
+            SetText(closingBalanceText, $"{result.ClosingBalance:0.00}");
             SetText(reputationText, $"{result.Reputation}");
             SetText(expiredOrdersText, result.ExpiredOrders.ToString());
 
