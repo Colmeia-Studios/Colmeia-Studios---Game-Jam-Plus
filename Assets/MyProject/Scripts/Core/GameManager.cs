@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace ColmeiaStudios.SoMaisUmPedido
 {
@@ -46,7 +48,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
         RoleSwapCountdown,
         RoleSwapResult,
         Transitioning,
-        GameOver
+        GameOver,
+        Victory
     }
 
     public enum RoleSwapVote
@@ -70,6 +73,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         [Header("Players")] [SerializeField] private PlayerController playerOne;
         [SerializeField] private PlayerController playerTwo;
+        [SerializeField, Tooltip("Temporarily logs the devices actually paired to each PlayerInput.")]
+        private bool logInputPairingDiagnostics;
         [SerializeField] private DeliveryUI deliveryUI;
         [SerializeField] private CookPreparationUI cookPrepationUI;
 
@@ -111,11 +116,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private PlayerRole lastBoundPlayerOneRole;
         private PlayerRole lastBoundPlayerTwoRole;
         private bool roleBindingsInitialized;
+        private string campaignId;
+        private float campaignPlaySeconds;
 
         public event Action MatchStateChanged;
         public event Action ClockChanged;
         public event Action MatchCycleChanged;
         public event Action GameOver;
+        public event Action GameWon;
 
         public MatchConfig MatchConfiguration => matchConfig;
         public OrderManager Orders => orderManager;
@@ -135,6 +143,11 @@ namespace ColmeiaStudios.SoMaisUmPedido
                                      cycleState != MatchCycleState.NotStarted;
         public bool IsWorkDayActive => cycleState == MatchCycleState.Working;
         public bool IsGameOver => cycleState == MatchCycleState.GameOver;
+        public bool IsVictory => cycleState == MatchCycleState.Victory;
+        public bool IsMatchEnded => IsGameOver || IsVictory;
+        public float CampaignPlaySeconds => campaignPlaySeconds;
+        public float CampaignRevenue => dailyResults.Sum(result => result.MoneyEarned);
+        public int CampaignDeliveries => dailyResults.Sum(result => result.Deliveries);
         public RoleSwapVote PlayerOneRoleSwapVote { get; private set; } = RoleSwapVote.Pending;
         public RoleSwapVote PlayerTwoRoleSwapVote { get; private set; } = RoleSwapVote.Pending;
         public float RoleSwapCountdownRemaining => voteCountdownRemaining;
@@ -194,7 +207,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
                     enabled = false;
                     return;
                 }
-
                 startHour = matchConfig.StartHour;
                 endHour = matchConfig.EndHour;
                 secondsPerHour = matchConfig.RealSecondsPerGameHour;
@@ -203,8 +215,47 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 dailyDeliveryGoal = matchConfig.DailyDeliveryGoal;
             }
 
+            bool restoring = CampaignSaveSystem.ConsumeContinueRequest(out CampaignSaveData save);
+            if (restoring && save != null)
+            {
+                RestoreCampaignValues(save);
+                MatchSettings.SetRoles(save.playerOneRole, save.playerTwoRole);
+            }
+            else
+            {
+                campaignId = CampaignSaveSystem.GetOrCreateActiveCampaignId();
+                campaignPlaySeconds = 0f;
+            }
             ConfigurePlayers();
-            BeginDay();
+            if (restoring)
+            {
+                if (orderManager == null || sharedPickupCounter == null || !orderManager.RestoreCampaignOrders(save))
+                {
+                    Debug.LogError("Campaign restore failed: assign OrderManager, PickupCounter, catalogs and scene references before continuing.", this);
+                    enabled = false;
+                    return;
+                }
+                bool playerOneRestored = playerOne != null && playerOne.RestoreCampaignState(save.players[0], sharedPickupCounter, this);
+                bool playerTwoRestored = playerTwo != null && playerTwo.RestoreCampaignState(save.players[1], sharedPickupCounter, this);
+                bool counterRestored = sharedPickupCounter.RestoreCampaignPhysicals(orderManager.AllOrders);
+                if (!playerOneRestored || !playerTwoRestored || !counterRestored)
+                {
+                    Debug.LogError("Campaign restore stopped because a saved player or physical mealbox could not be reconstructed. Check prefab references in the scene.", this);
+                    enabled = false;
+                    return;
+                }
+                MatchCycleChanged?.Invoke(); MatchStateChanged?.Invoke(); ClockChanged?.Invoke();
+            }
+            else
+            {
+                BeginDay();
+            }
+
+            if (reputation <= 0 && !IsMatchEnded)
+            {
+                orderManager?.EndDay();
+                FinishCampaign(victory: false);
+            }
         }
 
         private static bool IsValidDayConfiguration(MatchConfig config)
@@ -227,6 +278,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private void Update()
         {
             RefreshRoleBindingsIfChanged();
+
+            if (Time.timeScale > 0f && !IsMatchEnded && cycleState != MatchCycleState.NotStarted)
+                campaignPlaySeconds += Time.unscaledDeltaTime;
 
             if (cycleState == MatchCycleState.Transitioning)
             {
@@ -283,6 +337,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void BeginDay()
         {
+            Time.timeScale = 1f;
             currentDay++;
             elapsedSeconds = 0f;
             completedDailyDeliveries = 0;
@@ -316,7 +371,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (cycleState != MatchCycleState.ResultsWaiting || reputation <= 0)
                 return;
 
-            bool isRoleSwapMilestone = currentDay <= 25 && currentDay % 5 == 0;
+            Time.timeScale = 1f;
+
+            int finalDay = matchConfig != null ? matchConfig.LastCampaignDay : 30;
+            int swapInterval = matchConfig != null ? matchConfig.RoleSwapIntervalDays : 5;
+            bool beforeCampaignEnd = finalDay == 0 || currentDay < finalDay;
+            bool isRoleSwapMilestone = beforeCampaignEnd && swapInterval > 0 && currentDay % swapInterval == 0;
             if (isRoleSwapMilestone && lastRoleSwapVoteDay != currentDay)
             {
                 PlayerOneRoleSwapVote = RoleSwapVote.Pending;
@@ -371,6 +431,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (cycleState != MatchCycleState.RoleSwapResult || reputation <= 0)
                 return;
 
+            Time.timeScale = 1f;
             BeginTransitionToNextDay();
         }
 
@@ -397,7 +458,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 GetSpawnPointForRole(playerOne.AssignedRole == PlayerRole.Cook ? PlayerRole.Delivery : PlayerRole.Cook) == null ||
                 GetSpawnPointForRole(playerTwo.AssignedRole == PlayerRole.Cook ? PlayerRole.Delivery : PlayerRole.Cook) == null)
             {
-                Debug.LogError("Não foi possível trocar as funções: verifique os jogadores e os pontos Cook Spawn/Delivery Spawn.", this);
+                Debug.LogError("Could not swap roles: check the players and the Cook Spawn/Delivery Spawn points.", this);
                 return false;
             }
 
@@ -421,9 +482,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return true;
         }
 
-        private void BeginTransitionToNextDay()
-        {
-            if (cycleState != MatchCycleState.ResultsWaiting && cycleState != MatchCycleState.RoleSwapResult)
+    private void BeginTransitionToNextDay()
+    {
+            if ((cycleState != MatchCycleState.ResultsWaiting && cycleState != MatchCycleState.RoleSwapResult) || IsMatchEnded)
                 return;
 
             cycleState = MatchCycleState.Transitioning;
@@ -438,6 +499,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             // Move out of Working before notifications/penalties so repeated callbacks cannot close twice.
             cycleState = MatchCycleState.ResultsWaiting;
+            Time.timeScale = 0f;
             isDayComplete = true;
             orderManager?.EndDay();
             int delivered = completedDailyDeliveries;
@@ -462,15 +524,57 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 player?.ResetDailyState();
             }
 
+            if (reputation <= 0)
+                FinishCampaign(victory: false);
+            else if ((matchConfig != null ? matchConfig.LastCampaignDay : 30) > 0 &&
+                     currentDay >= (matchConfig != null ? matchConfig.LastCampaignDay : 30))
+                FinishCampaign(victory: true);
+            else
+            {
+                MatchCycleChanged?.Invoke();
+                MatchStateChanged?.Invoke();
+                ClockChanged?.Invoke();
+            }
+        }
+
+        private void FinishCampaign(bool victory)
+        {
+            if (IsMatchEnded) return;
+            cycleState = victory ? MatchCycleState.Victory : MatchCycleState.GameOver;
+            Time.timeScale = 0f;
             MatchCycleChanged?.Invoke();
             MatchStateChanged?.Invoke();
             ClockChanged?.Invoke();
-            if (reputation <= 0)
+            if (victory) GameWon?.Invoke();
+            else GameOver?.Invoke();
+        }
+
+        public bool TryRegisterCampaignCompletion(out CampaignHistoryRecord record)
+        {
+            record = null;
+            if (!IsMatchEnded) return false;
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Guid.NewGuid().ToString("N");
+            if (CampaignSaveSystem.TryGetHistoryRecord(campaignId, out record))
             {
-                cycleState = MatchCycleState.GameOver;
-                MatchCycleChanged?.Invoke();
-                GameOver?.Invoke();
+                CampaignSaveSystem.Delete();
+                return true;
             }
+            record = new CampaignHistoryRecord
+            {
+                id = campaignId,
+                completedAtUtc = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                playSeconds = Mathf.Max(0f, campaignPlaySeconds),
+                revenue = Mathf.Max(0f, CampaignRevenue),
+                deliveries = Mathf.Max(0, CampaignDeliveries),
+                reputation = Mathf.Clamp(reputation, 0, 5),
+                victory = IsVictory
+            };
+            if (!CampaignSaveSystem.RecordCompletedCampaign(record)) return false;
+            CampaignSaveSystem.TryGetHistoryRecord(campaignId, out record);
+            // Delete only after the independent history write succeeds. If deletion fails,
+            // the history ID still prevents this completed save from being continued.
+            CampaignSaveSystem.Delete();
+            return true;
         }
 
         private IEnumerable<PlayerController> GetPlayers()
@@ -506,18 +610,42 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 MatchSettings.PlayerOneDevice.added && MatchSettings.PlayerTwoDevice.added)
             {
                 bool playerOneConfigured = playerOne.ConfigureMatchInput(playerOneRole, playerOneConfig,
-                    MatchSettings.PlayerOneDevice, MatchSettings.PlayerOneMouse, MatchSettings.PlayerOneScheme);
+                    MatchSettings.PlayerOneDevice, MatchSettings.PlayerOneMouse,
+                    MatchSettings.PlayerOneKeyboard, MatchSettings.PlayerOneScheme);
                 bool playerTwoConfigured = playerTwo.ConfigureMatchInput(playerTwoRole, playerTwoConfig,
-                    MatchSettings.PlayerTwoDevice, MatchSettings.PlayerTwoMouse, MatchSettings.PlayerTwoScheme);
+                    MatchSettings.PlayerTwoDevice, MatchSettings.PlayerTwoMouse,
+                    null, MatchSettings.PlayerTwoScheme);
                 if (!playerOneConfigured || !playerTwoConfigured)
                 {
-                    Debug.LogError("Não foi possível vincular os dispositivos aos jogadores da partida.", this);
+                    Debug.LogError($"Could not pair devices: P1 scheme={MatchSettings.PlayerOneScheme}, P2 scheme={MatchSettings.PlayerTwoScheme}.", this);
                     return;
+                }
+                if (playerOne.HasPairedDeviceInCommon(playerTwo, out string duplicateDevice))
+                {
+                    Debug.LogError($"Invalid InputUser pairing: '{duplicateDevice}' is shared between Player 1 and Player 2.", this);
+                    return;
+                }
+                InputDevice[] expectedPlayerOneDevices = new[]
+                    { MatchSettings.PlayerOneDevice, MatchSettings.PlayerOneKeyboard, MatchSettings.PlayerOneMouse }
+                    .Where(device => device != null).ToArray();
+                InputDevice[] expectedPlayerTwoDevices = new[]
+                    { MatchSettings.PlayerTwoDevice, MatchSettings.PlayerTwoMouse }
+                    .Where(device => device != null).ToArray();
+                if (!playerOne.HasExpectedInputPairing(MatchSettings.PlayerOneScheme, expectedPlayerOneDevices) ||
+                    !playerTwo.HasExpectedInputPairing(MatchSettings.PlayerTwoScheme, expectedPlayerTwoDevices))
+                {
+                    Debug.LogError("PlayerInput components did not retain all requested devices and schemes after pairing both players.", this);
+                    return;
+                }
+                if (logInputPairingDiagnostics)
+                {
+                    Debug.Log($"Final PlayerInput pairing: Player 1 [{playerOne.DescribeInputPairingForDiagnostics()}]; " +
+                              $"Player 2 [{playerTwo.DescribeInputPairingForDiagnostics()}]", this);
                 }
             }
             else
             {
-                Debug.LogError("A configuração de dispositivos da partida está inválida ou um dispositivo foi desconectado.", this);
+                Debug.LogError("Match device configuration is invalid or a device was disconnected.", this);
                 return;
             }
 
@@ -667,6 +795,64 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return null;
         }
 
+        public bool SaveCampaign()
+        {
+            if (orderManager == null || playerOne == null || playerTwo == null)
+            {
+                Debug.LogError("Campaign save failed: GameManager requires OrderManager and both PlayerControllers.", this);
+                return false;
+            }
+            var save = new CampaignSaveData
+            {
+                currentDay = Mathf.Max(1, currentDay), elapsedSeconds = elapsedSeconds,
+                campaignId = campaignId, campaignPlaySeconds = campaignPlaySeconds,
+                balance = balance, reputation = reputation, dailyDeliveryGoal = dailyDeliveryGoal,
+                completedDailyDeliveries = completedDailyDeliveries, openingBalance = openingBalance,
+                dailyMoneyEarned = dailyMoneyEarned, cycleState = cycleState,
+                playerOneRole = playerOne.AssignedRole, playerTwoRole = playerTwo.AssignedRole,
+                transitionElapsed = transitionElapsed, voteCountdownRemaining = voteCountdownRemaining,
+                lastRoleSwapVoteDay = lastRoleSwapVoteDay, lastRoleSwapSucceeded = lastRoleSwapSucceeded,
+                playerOneVote = PlayerOneRoleSwapVote, playerTwoVote = PlayerTwoRoleSwapVote
+            };
+            save.paidOrderIds.AddRange(paidOrderIds);
+            save.purchasedUpgradeIds.AddRange(purchasedUpgradeIds);
+            save.players.Add(playerOne.CaptureCampaignState(elapsedSeconds));
+            save.players.Add(playerTwo.CaptureCampaignState(elapsedSeconds));
+            orderManager.CaptureCampaignOrders(save);
+            foreach (DailyMatchResult result in dailyResults)
+                save.dailyResults.Add(new CampaignDayData { day = result.Day, deliveries = result.Deliveries,
+                    goal = result.DeliveryGoal, expired = result.ExpiredOrders, openingBalance = result.OpeningBalance,
+                    closingBalance = result.ClosingBalance, moneyEarned = result.MoneyEarned, reputation = result.Reputation });
+            return CampaignSaveSystem.Save(save);
+        }
+
+        private void RestoreCampaignValues(CampaignSaveData save)
+        {
+            currentDay = Mathf.Max(1, save.currentDay);
+            campaignId = string.IsNullOrWhiteSpace(save.campaignId) ? Guid.NewGuid().ToString("N") : save.campaignId;
+            campaignPlaySeconds = Mathf.Max(0f, save.campaignPlaySeconds);
+            elapsedSeconds = Mathf.Clamp(save.elapsedSeconds, 0f, DayDurationSeconds);
+            balance = Mathf.Max(0f, save.balance); reputation = Mathf.Clamp(save.reputation, 0, 5);
+            dailyDeliveryGoal = Mathf.Max(1, save.dailyDeliveryGoal);
+            completedDailyDeliveries = Mathf.Max(0, save.completedDailyDeliveries);
+            openingBalance = save.openingBalance; dailyMoneyEarned = Mathf.Max(0f, save.dailyMoneyEarned);
+            cycleState = Enum.IsDefined(typeof(MatchCycleState), save.cycleState) ? save.cycleState : MatchCycleState.Working;
+            isDayComplete = cycleState != MatchCycleState.Working && cycleState != MatchCycleState.NotStarted;
+            transitionElapsed = Mathf.Max(0f, save.transitionElapsed);
+            voteCountdownRemaining = Mathf.Clamp(save.voteCountdownRemaining, 0f, 3f);
+            lastRoleSwapVoteDay = Mathf.Max(0, save.lastRoleSwapVoteDay);
+            lastRoleSwapSucceeded = save.lastRoleSwapSucceeded;
+            PlayerOneRoleSwapVote = save.playerOneVote; PlayerTwoRoleSwapVote = save.playerTwoVote;
+            paidOrderIds.Clear(); if (save.paidOrderIds != null) paidOrderIds.UnionWith(save.paidOrderIds);
+            purchasedUpgradeIds.Clear(); if (save.purchasedUpgradeIds != null) purchasedUpgradeIds.UnionWith(save.purchasedUpgradeIds);
+            dailyResults.Clear();
+            if (save.dailyResults != null)
+                foreach (CampaignDayData item in save.dailyResults)
+                    if (item != null) dailyResults.Add(new DailyMatchResult(item.day, item.deliveries, item.goal, item.expired,
+                        item.openingBalance, item.closingBalance, item.moneyEarned, item.reputation));
+            if (cycleState == MatchCycleState.NotStarted) cycleState = MatchCycleState.Working;
+        }
+
         public bool TryGetOrder(string orderId, out OrderRecord order)
         {
             if (orderManager == null)
@@ -698,7 +884,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (!IsWorkDayActive || orderManager == null)
             {
-                result = !IsWorkDayActive ? "O expediente foi encerrado." : "OrderManager não está configurado.";
+                result = !IsWorkDayActive ? "The workday has ended." : "OrderManager is not configured.";
                 return false;
             }
 
@@ -710,7 +896,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (!IsWorkDayActive || cook == null || cook.AssignedRole != PlayerRole.Cook ||
                 sharedPickupCounter == null)
             {
-                result = "O Cook ou o balcão não está disponível para depositar a marmita.";
+                result = "The Cook or pickup counter is unavailable for mealbox deposit.";
                 return false;
             }
 
@@ -754,6 +940,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 Destroy(mealbox.gameObject);
             }
 
+            AudioManager.Instance?.PlaySfx(AudioCue.DeliveryPickup);
             MatchStateChanged?.Invoke();
             return true;
         }

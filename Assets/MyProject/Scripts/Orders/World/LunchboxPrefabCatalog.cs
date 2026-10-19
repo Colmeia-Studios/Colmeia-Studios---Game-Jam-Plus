@@ -28,10 +28,21 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
         }
 
-        public GameObject ChooseClosedPrefab()
+        public GameObject ChooseClosedPrefab() => ChooseClosedPrefab(out _);
+
+        public GameObject ChooseClosedPrefab(out int variant)
         {
+            variant = -1;
             if (!HasAllClosedPrefabs) return null;
-            return Random.Range(0, 2) == 0 ? closedMealboxA : closedMealboxB;
+            variant = Random.Range(0, 2);
+            return GetClosedPrefab(variant);
+        }
+
+        public GameObject GetClosedPrefab(int variant)
+        {
+            if (variant == 0) return closedMealboxA;
+            if (variant == 1) return closedMealboxB;
+            return null;
         }
 
         public bool HasAllClosedPrefabs => closedMealboxA != null && closedMealboxB != null;

@@ -15,6 +15,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private static bool restoreNavigationEvents;
         private static CursorLockMode restoreCursorLockState;
         private static bool restoreCursorVisibility;
+
+        public static bool IsCursorRequested => CursorOwners.Count > 0;
         private static bool cursorStateCaptured;
 
         [Header("Owner")] [SerializeField] private PlayerController owner;
@@ -195,6 +197,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             phoneCanvas.renderMode = RenderMode.ScreenSpaceCamera;
             phoneCanvas.worldCamera = owner.GetCamera();
+            phoneCanvas.planeDistance = 0.02f;
             // Keep the HUD in the owner's camera viewport while drawing it above
             // the world and canvases that share the display.
             phoneCanvas.overrideSorting = true;
@@ -356,6 +359,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             phonePanel.SetActive(open);
+            AudioManager.Instance?.PlaySfx(AudioCue.Smartphone);
             UpdateCursorOwnership(open);
             UpdateRaycaster(open);
             if (open)
@@ -461,7 +465,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             dailyGoalText.text =
                 $"{gameManager.CompletedDailyDeliveries}/{gameManager.DailyDeliveryGoal}";
             if (dayText != null)
-                dayText.text = $"DIA {gameManager.CurrentDay}";
+                dayText.text = $"DAY {gameManager.CurrentDay}";
         }
 
         private void UpdateCursorOwnership(bool open)

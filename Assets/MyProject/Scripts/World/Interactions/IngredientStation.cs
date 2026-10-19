@@ -25,7 +25,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public string IngredientId => HasValidIngredient ? ingredientData.Id.Trim() : string.Empty;
         public string DisplayName => HasValidIngredient && !string.IsNullOrWhiteSpace(ingredientData.DisplayName)
             ? ingredientData.DisplayName
-            : "Ingrediente sem configuração";
+            : "Ingredient not configured";
         public Color IngredientColor => HasValidIngredient ? ingredientData.Color : Color.white;
 
         private bool IsUnlocked => HasValidIngredient && GameManager.Instance != null &&
@@ -33,8 +33,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public override string GetInteractionText()
         {
-            if (!HasValidIngredient) return "Estação de ingrediente sem configuração.";
-            return IsUnlocked ? $"Interagir para adicionar {DisplayName}." : $"{DisplayName} bloqueado.";
+            if (!HasValidIngredient) return "Ingredient station is not configured.";
+            return IsUnlocked ? $"Interact to collect {DisplayName}." : $"{DisplayName} is locked.";
         }
 
         public override bool CanInteract(PlayerController player)
@@ -49,22 +49,22 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (!HasValidIngredient)
             {
                 Debug.LogError($"IngredientStation '{name}' está sem IngredientData ou com ID vazio.", this);
-                player.ShowGameplayMessage("Esta estação de ingrediente está sem configuração.");
+                player.ShowGameplayMessage("This ingredient station is not configured.");
                 return;
             }
             if (GameManager.Instance == null)
             {
-                player.ShowGameplayMessage("A configuração da partida não está disponível para validar este ingrediente.");
+                player.ShowGameplayMessage("Match configuration is unavailable, so this ingredient cannot be validated.");
                 return;
             }
             if (!IsUnlocked)
             {
-                player.ShowGameplayMessage($"{DisplayName} ainda está bloqueado.");
+                player.ShowGameplayMessage($"{DisplayName} is still locked.");
                 return;
             }
             if (string.IsNullOrWhiteSpace(player.SelectedOrderId))
             {
-                player.ShowGameplayMessage("Selecione um pedido no telefone antes de adicionar ingredientes.");
+                player.ShowGameplayMessage("Select an order on the phone before adding ingredients.");
                 return;
             }
 

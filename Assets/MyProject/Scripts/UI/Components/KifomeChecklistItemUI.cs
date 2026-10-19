@@ -8,6 +8,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
     {
         [SerializeField] private TMP_Text ingredientText;
         [SerializeField] private Image stateIcon;
+        private bool hasState;
+        private bool previousComplete;
 
         public void Configure(TMP_Text label, Image icon)
         {
@@ -17,6 +19,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public void SetState(string label, bool complete, bool invalid = false)
         {
+            if (hasState && !previousComplete && complete && !invalid)
+                AudioManager.Instance?.PlaySfx(AudioCue.ChecklistComplete);
+            hasState = true;
+            previousComplete = complete;
             if (ingredientText != null)
             {
                 ingredientText.text = label;

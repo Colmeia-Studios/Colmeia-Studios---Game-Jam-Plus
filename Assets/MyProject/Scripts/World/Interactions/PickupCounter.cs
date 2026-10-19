@@ -83,7 +83,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             PlayerController cookPlayer = GetPlayerForRole(PlayerRole.Cook);
             if (cookPlayer != null && cookPlayer.CarriedPreparedMealbox != null)
-                return "Interagir para depositar a marmita pronta.";
+                return "Interact to deposit the prepared mealbox.";
 
             PlayerController deliveryPlayer = GameManager.Instance != null
                 ? GameManager.Instance.PlayerOne != null &&
@@ -93,12 +93,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 : null;
             if (deliveryPlayer != null && deliveryPlayer.CarriedOrderIds.Count >= deliveryPlayer.InventoryCapacity)
             {
-                return "Mochila cheia: limite de três marmitas.";
+                return "Backpack full: maximum of three mealboxes.";
             }
 
             return ReadyOrderCount == 1
-                ? "Interagir para retirar a marmita."
-                : $"Interagir para retirar uma marmita ({ReadyOrderCount} disponíveis).";
+                ? "Interact to collect the mealbox."
+                : $"Interact to collect a mealbox ({ReadyOrderCount} available).";
         }
 
         public override void Interact(PlayerController player)
@@ -117,7 +117,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 }
                 else
                 {
-                    player.ShowGameplayMessage("Não foi possível depositar a marmita no balcão.");
+                    player.ShowGameplayMessage("Could not deposit the mealbox at the counter.");
                 }
 
                 return;
@@ -125,7 +125,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (player.CarriedOrderIds.Count >= player.InventoryCapacity)
             {
-                player.ShowGameplayMessage("Mochila cheia: limite de três marmitas.");
+                player.ShowGameplayMessage("Backpack full: maximum of three mealboxes.");
                 return;
             }
 
@@ -149,15 +149,61 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
                 if (GameManager.Instance.TryPickupOrder(orderId, player))
                 {
-                    player.ShowGameplayMessage($"Pedido #{orderId} guardado na mochila.");
+                    player.ShowGameplayMessage($"Order #{orderId} stored in the backpack.");
                 }
                 else
                 {
-                    player.ShowGameplayMessage("Não foi possível retirar essa marmita.");
+                    player.ShowGameplayMessage("Could not collect this mealbox.");
                 }
 
                 return;
             }
+        }
+
+        public MealboxPhysical CreateCampaignMealbox(OrderRecord order, bool closed, int closedVariant = -1)
+        {
+            if (order == null || prefabCatalog == null) return null;
+            GameObject prefab = closed
+                ? (closedVariant >= 0 ? prefabCatalog.GetClosedPrefab(closedVariant) : prefabCatalog.ChooseClosedPrefab(out closedVariant))
+                : prefabCatalog.GetEmptyPrefab(order.LunchboxType);
+            if (prefab == null) return null;
+            GameObject instance = Instantiate(prefab);
+            if (instance == null) return null;
+            MealboxPhysical physical = instance.GetComponent<MealboxPhysical>();
+            if (physical == null && closed) physical = instance.AddComponent<MealboxPhysical>();
+            if (physical == null) { Destroy(instance); return null; }
+            if (closed) physical.ConfigureClosedForOrder(order.OrderId, order.DisplayName, order.LunchboxType, closedVariant);
+            else physical.ConfigureEmptyForOrder(order.OrderId, order.DisplayName, order.LunchboxType);
+            return physical;
+        }
+
+        public bool RestoreReadyMealbox(OrderRecord order)
+        {
+            if (order == null || order.State != OrderState.ReadyForPickup ||
+                !orderManager.TryGetOrder(order.OrderId, out OrderRecord registered) || registered != order ||
+                !CanRegisterReadyOrder(order.OrderId)) return false;
+            MealboxPhysical physical = CreateCampaignMealbox(order, true, order.ClosedVisualVariant);
+            if (physical == null) return false;
+            if (TryRegisterReadyOrder(order.OrderId, physical))
+            {
+                order.ClosedVisualVariant = physical.ClosedVisualVariant;
+                return true;
+            }
+            Destroy(physical.gameObject);
+            return false;
+        }
+
+        public bool RestoreCampaignPhysicals(System.Collections.Generic.IReadOnlyList<OrderRecord> orders)
+        {
+            if (orders == null) return false;
+            foreach (OrderRecord order in orders)
+                if (order != null && order.State == OrderState.ReadyForPickup && !readyMealboxes.ContainsKey(order.OrderId) &&
+                    !RestoreReadyMealbox(order))
+                {
+                    Debug.LogError($"Could not reconstruct the counter mealbox for order '{order.OrderId}'. Check the closed prefab catalog.", this);
+                    return false;
+                }
+            return true;
         }
 
         public bool TryRegisterReadyOrder(string orderId)
@@ -208,7 +254,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
-            GameObject closedPrefab = prefabCatalog.ChooseClosedPrefab();
+            GameObject closedPrefab = prefabCatalog.ChooseClosedPrefab(out int visualVariant);
             if (closedPrefab == null)
             {
                 Debug.LogError($"LunchboxPrefabCatalog '{prefabCatalog.name}' has no closed mealbox prefab assigned.", prefabCatalog);
@@ -223,7 +269,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 mealbox = instance.AddComponent<MealboxPhysical>();
                 Debug.LogWarning($"Closed prefab '{closedPrefab.name}' had no MealboxPhysical; added the component to its instance.", closedPrefab);
             }
-            mealbox.ConfigureClosedForOrder(order.OrderId, order.DisplayName, order.LunchboxType);
+            mealbox.ConfigureClosedForOrder(order.OrderId, order.DisplayName, order.LunchboxType, visualVariant);
+            order.ClosedVisualVariant = visualVariant;
             return true;
         }
 
@@ -236,20 +283,20 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 order.State != OrderState.ReadyForCookPickup || !mealbox.IsClosed ||
                 mealbox.Type != order.LunchboxType || !CanRegisterReadyOrder(mealbox.OrderId))
             {
-                result = "A marmita do Cook ou a vaga do balcão está indisponível.";
+                result = "The Cook mealbox or counter slot is unavailable.";
                 return false;
             }
 
             if (!orderManager.TryMarkDepositedForPickup(order.OrderId))
             {
-                result = "O pedido expirou ou não pode ser depositado.";
+                result = "The order expired or cannot be deposited.";
                 return false;
             }
 
             if (!TryRegisterReadyOrder(order.OrderId, mealbox))
             {
                 orderManager.TryRollbackDepositForPickup(order.OrderId);
-                result = "O balcão não conseguiu registrar a marmita; ela continua com o Cook.";
+                result = "The counter could not register the mealbox; the Cook is still carrying it.";
                 return false;
             }
 
@@ -259,13 +306,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 orderManager.TryRollbackDepositForPickup(order.OrderId);
                 mealbox.transform.SetParent(cook.GetMealboxCarryPoint(), false);
                 mealbox.SetAttachedToPlayer(true);
-                result = "A transferência da marmita falhou; tente novamente.";
+                result = "Mealbox transfer failed. Please try again.";
                 return false;
             }
 
             orderManager.NotifyOrdersChanged();
             cook.TryCompletePendingPreparation();
-            result = $"Pedido #{order.OrderId} depositado. O Delivery pode retirá-lo.";
+            result = $"Order #{order.OrderId} deposited. The Delivery player can now collect it.";
             return true;
         }
 

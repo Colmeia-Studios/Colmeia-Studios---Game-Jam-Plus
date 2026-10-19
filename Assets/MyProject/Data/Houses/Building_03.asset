@@ -15,4 +15,4 @@ MonoBehaviour:
   id: 08
   customerName: Alysson
   description: Brown Building
-  houseImage: {fileID: 0}
+  houseImage: {fileID: 21300000, guid: 491f5742394956fbc9990b95b447a51a, type: 3}

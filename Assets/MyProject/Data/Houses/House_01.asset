@@ -14,5 +14,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.HouseData
   id: 01
   customerName: Matheus
-  description: Moss green house with a fence
-  houseImage: {fileID: 0}
+  description: House Number #1
+  houseImage: {fileID: 21300000, guid: 6de6be6b1463a115a87968afc9d75953, type: 3}

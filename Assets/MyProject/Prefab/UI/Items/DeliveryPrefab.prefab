@@ -832,8 +832,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 12.5, y: 0}
-  m_SizeDelta: {x: -45, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: -20, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &732065553555148382
 CanvasRenderer:
@@ -865,8 +865,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: Casa tal da cor tal
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: de1f283858be823c5a5c2526eb6b5596, type: 2}
-  m_sharedMaterial: {fileID: 192906466702999673, guid: de1f283858be823c5a5c2526eb6b5596, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 644d4ca430acc38a19d8b67e35a1f74d, type: 2}
+  m_sharedMaterial: {fileID: -2058257508513586802, guid: 644d4ca430acc38a19d8b67e35a1f74d, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -897,7 +897,7 @@ MonoBehaviour:
   m_fontSizeMin: 18
   m_fontSizeMax: 72
   m_fontStyle: 0
-  m_HorizontalAlignment: 1
+  m_HorizontalAlignment: 2
   m_VerticalAlignment: 512
   m_textAlignment: 65535
   m_characterSpacing: 0
@@ -1291,8 +1291,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: 2:00
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: de1f283858be823c5a5c2526eb6b5596, type: 2}
-  m_sharedMaterial: {fileID: 192906466702999673, guid: de1f283858be823c5a5c2526eb6b5596, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 644d4ca430acc38a19d8b67e35a1f74d, type: 2}
+  m_sharedMaterial: {fileID: -2058257508513586802, guid: 644d4ca430acc38a19d8b67e35a1f74d, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []

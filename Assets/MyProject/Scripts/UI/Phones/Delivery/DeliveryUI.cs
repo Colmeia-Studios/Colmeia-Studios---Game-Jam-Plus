@@ -61,6 +61,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             gameplayCanvas.renderMode = RenderMode.ScreenSpaceCamera;
             gameplayCanvas.worldCamera = deliveryPlayer.GetCamera();
+            gameplayCanvas.planeDistance = 0.02f;
             gameplayCanvas.overrideSorting = true;
             gameplayCanvas.sortingOrder = 100;
             initialized = true;
@@ -96,59 +97,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private static string BuildMealDescription(OrderRecord order)
         {
-            var ingredientNames = new List<string>(order.RequiredIngredientIds.Count);
-            bool needsStationLookup = order.RequiredIngredients.Count < order.RequiredIngredientIds.Count;
-            for (int i = 0; i < order.RequiredIngredients.Count && !needsStationLookup; i++)
-            {
-                IngredientData ingredient = order.RequiredIngredients[i];
-                needsStationLookup = ingredient == null || string.IsNullOrWhiteSpace(ingredient.DisplayName);
-            }
-
-            IngredientStation[] stations = needsStationLookup
-                ? FindObjectsByType<IngredientStation>()
-                : System.Array.Empty<IngredientStation>();
-
-            for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
-            {
-                IngredientData ingredient = i < order.RequiredIngredients.Count
-                    ? order.RequiredIngredients[i]
-                    : null;
-                string ingredientName = ingredient != null &&
-                                        !string.IsNullOrWhiteSpace(ingredient.DisplayName)
-                    ? ingredient.DisplayName
-                    : FindIngredientName(order.RequiredIngredientIds[i], stations);
-                ingredientNames.Add(ingredientName);
-            }
-
-            string mealDescription = string.Join(", ", ingredientNames);
-            return string.IsNullOrWhiteSpace(mealDescription)
-                ? order.DisplayName
-                : $"{order.DisplayName} — {mealDescription}";
+            return order.DisplayName;
         }
-
-        private static string FindIngredientName(string ingredientId, IReadOnlyList<IngredientStation> stations)
-        {
-            string normalizedId = IngredientStation.NormalizeLegacyId(ingredientId);
-            for (int i = 0; i < stations.Count; i++)
-            {
-                IngredientStation station = stations[i];
-                if (station == null)
-                {
-                    continue;
-                }
-
-                if (string.Equals(station.IngredientId, ingredientId, System.StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(
-                        IngredientStation.NormalizeLegacyId(station.DisplayName),
-                        normalizedId,
-                        System.StringComparison.OrdinalIgnoreCase))
-                {
-                    return string.IsNullOrWhiteSpace(station.DisplayName) ? ingredientId : station.DisplayName;
-                }
-            }
-
-            return ingredientId;
-        }
+        
 
         private void EnsureEntryCount(int count)
         {

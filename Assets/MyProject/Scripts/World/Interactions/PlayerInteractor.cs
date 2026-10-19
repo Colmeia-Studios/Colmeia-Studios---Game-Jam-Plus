@@ -52,6 +52,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Update()
         {
+            if (Time.timeScale <= 0f) return;
             UpdateCurrentInteractable();
         }
 

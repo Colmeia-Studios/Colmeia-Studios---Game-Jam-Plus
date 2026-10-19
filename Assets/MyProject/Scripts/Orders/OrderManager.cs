@@ -113,8 +113,48 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public float ActivatedAt { get; private set; }
         public float PickedUpAt { get; private set; }
         public OrderState State { get; private set; }
+        public int ClosedVisualVariant { get; internal set; } = -1;
         private bool hasSuspendedDeadline;
         private float suspendedRemainingSeconds;
+        internal float SuspendedRemainingSeconds => suspendedRemainingSeconds;
+
+        internal OrderRecord(CampaignOrderData saved, HouseData destination, MatchConfig config, float currentTime)
+        {
+            OrderId = saved.id;
+            DisplayName = string.IsNullOrWhiteSpace(saved.displayName) ? saved.id : saved.displayName;
+            List<string> ids = saved.ingredientIds ?? new List<string>();
+            requiredIngredientIds = ids.AsReadOnly();
+            var assets = new List<IngredientData>(ids.Count);
+            foreach (string id in ids)
+            {
+                IngredientData found = null;
+                if (config != null && config.IngredientUnlocks != null)
+                    foreach (IngredientUnlockRule rule in config.IngredientUnlocks)
+                        if (rule != null && rule.Ingredient != null && string.Equals(rule.Ingredient.Id?.Trim(), id?.Trim(), StringComparison.OrdinalIgnoreCase)) { found = rule.Ingredient; break; }
+                assets.Add(found);
+            }
+            requiredIngredients = assets.AsReadOnly();
+            LunchboxType = saved.lunchboxType;
+            BaseValue = saved.baseValue;
+            DeadlineSeconds = saved.deadlineSeconds;
+            DayNumber = Mathf.Max(1, saved.dayNumber);
+            Destination = destination;
+            DestinationHouseId = saved.destinationHouseId;
+            PickedUpAt = saved.pickedUpAt;
+            State = saved.state;
+            ClosedVisualVariant = saved.closedVisualVariant;
+            if (State == OrderState.Pending)
+            {
+                hasSuspendedDeadline = true;
+                suspendedRemainingSeconds = Mathf.Clamp(saved.remainingSeconds, 0f, DeadlineSeconds);
+            }
+            else
+            {
+                ActivatedAt = currentTime - Mathf.Max(0f, DeadlineSeconds - saved.remainingSeconds);
+                if (State == OrderState.Delivered || State == OrderState.Expired)
+                    ActivatedAt = saved.activatedAt;
+            }
+        }
 
         public float GetRemainingSeconds(float currentTime)
         {
@@ -403,34 +443,34 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (GameManager.Instance != null && !GameManager.Instance.IsWorkDayActive)
             {
-                result = "O expediente foi encerrado.";
+                result = "The workday has ended.";
                 return false;
             }
 
             if (!TryGetOrder(orderId, out OrderRecord order) ||
                 order.State != OrderState.InPreparation)
             {
-                result = "O pedido não está em preparação.";
+                result = "The order is not being prepared.";
                 return false;
             }
 
             if (order.GetRemainingSeconds(CurrentTime) <= 0f)
             {
                 Expire(order);
-                result = "O prazo do pedido expirou antes de ficar pronto.";
+                result = "The order deadline expired before it was ready.";
                 return false;
             }
 
             if (lunchboxType != order.LunchboxType)
             {
-                result = "Tipo de marmita incorreto.";
+                result = "Incorrect mealbox type.";
                 return false;
             }
 
             if (addedIngredientIds == null ||
                 !IngredientsMatch(order.RequiredIngredientIds, addedIngredientIds))
             {
-                result = "Ingredientes incorretos: confira ausentes, extras e duplicados.";
+                result = "Incorrect ingredients: check for missing, extra, or duplicate ingredients.";
                 return false;
             }
 
@@ -439,7 +479,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 : null;
             if (cook == null || cook.AssignedRole != PlayerRole.Cook || counter == null)
             {
-                result = "Não foi possível concluir: o Cook ou o balcão não está configurado.";
+                result = "Could not complete preparation: the Cook or pickup counter is not configured.";
                 return false;
             }
 
@@ -448,32 +488,32 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 !string.Equals(emptyMealbox.OrderId, order.OrderId, StringComparison.OrdinalIgnoreCase) ||
                 emptyMealbox.Type != order.LunchboxType)
             {
-                result = "Pegue na estação a marmita vazia exigida por este pedido antes de concluir a receita.";
+                result = "Collect the empty mealbox required by this order from its station before finishing the recipe.";
                 return false;
             }
 
             if (!cook.CanCarryPreparedMealbox)
             {
-                result = "A receita está pronta. Deposite primeiro a marmita que está carregando para poder levar esta.";
+                result = "The recipe is ready. Deposit the mealbox you are carrying before taking this one.";
                 return false;
             }
 
             if (!counter.TryCreateClosedMealboxForCompletion(orderId, cook, out MealboxPhysical closedMealbox))
             {
-                result = "Não foi possível escolher uma marmita fechada. Confira o LunchboxPrefabCatalog.";
+                result = "Could not select a closed mealbox. Check the LunchboxPrefabCatalog.";
                 return false;
             }
 
             if (!cook.ReplacePreparationWithClosedMealbox(closedMealbox, order.OrderId, order.LunchboxType))
             {
                 Destroy(closedMealbox.gameObject);
-                result = "Não foi possível transferir a marmita fechada para o Cook; a marmita vazia foi preservada.";
+                result = "Could not transfer the closed mealbox to the Cook; the empty mealbox was preserved.";
                 return false;
             }
 
             order.SetState(OrderState.ReadyForCookPickup);
             TraceOrderLifecycle(order, "preparation completed; ready for Cook pickup");
-            result = $"Pedido #{orderId} pronto. Leve a marmita até o balcão.";
+            result = $"Order #{orderId} is ready. Take the mealbox to the counter.";
             ActivatePendingOrders();
             OrdersChanged?.Invoke();
             return true;
@@ -532,6 +572,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return false;
             }
 
+            AudioManager.Instance?.PlaySfx(AudioCue.Notification);
             player.RemoveOrderFromInventory(orderId);
             GameManager.Instance.NotifyMatchStateChanged();
             return true;
@@ -556,8 +597,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return true;
         }
 
+        public void EnsureInitializedForCampaign()
+        {
+            if (!initialized) InitializeOrders();
+        }
+
         private void InitializeOrders()
         {
+            if (initialized) return;
             activeOrders.Clear();
             allOrders.Clear();
             pendingOrders.Clear();
@@ -747,6 +794,66 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return true;
         }
 
+        public void CaptureCampaignOrders(CampaignSaveData save)
+        {
+            if (save == null) return;
+            save.generatedOrderSequence = generatedOrderSequence;
+            save.orders.Clear();
+            foreach (OrderRecord order in allOrders)
+            {
+                if (order == null) continue;
+                CampaignOrderData entry = new CampaignOrderData
+                {
+                    id = order.OrderId, displayName = order.DisplayName,
+                    lunchboxType = order.LunchboxType, baseValue = order.BaseValue,
+                    deadlineSeconds = order.DeadlineSeconds,
+                    remainingSeconds = order.State == OrderState.Pending
+                        ? order.SuspendedRemainingSeconds : order.GetRemainingSeconds(CurrentTime),
+                    activatedAt = order.ActivatedAt, pickedUpAt = order.PickedUpAt,
+                    dayNumber = order.DayNumber, destinationHouseId = order.DestinationHouseId,
+                    state = order.State, closedVisualVariant = order.ClosedVisualVariant
+                };
+                for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
+                    entry.ingredientIds.Add(order.RequiredIngredientIds[i]);
+                save.orders.Add(entry);
+            }
+        }
+
+        public bool RestoreCampaignOrders(CampaignSaveData save)
+        {
+            if (save == null || save.orders == null || matchConfig == null) return false;
+            EnsureInitializedForCampaign();
+            if (!initialized) return false;
+            activeOrders.Clear(); allOrders.Clear(); pendingOrders.Clear(); ordersById.Clear();
+            foreach (CampaignOrderData entry in save.orders)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.id) ||
+                    !Enum.IsDefined(typeof(LunchboxType), entry.lunchboxType) ||
+                    !Enum.IsDefined(typeof(OrderState), entry.state))
+                {
+                    Debug.LogWarning("An invalid saved order was skipped.", this);
+                    continue;
+                }
+                HouseData house = null;
+                if (matchConfig.HouseCatalog != null)
+                    foreach (HouseData candidate in matchConfig.HouseCatalog)
+                        if (candidate != null && AreIdsEqual(candidate.Id, entry.destinationHouseId)) { house = candidate; break; }
+                if (house == null)
+                {
+                    Debug.LogWarning($"Saved order '{entry.id}' references missing house '{entry.destinationHouseId}' and was skipped.", this);
+                    continue;
+                }
+                var restored = new OrderRecord(entry, house, matchConfig, CurrentTime);
+                if (!AddOrder(restored)) continue;
+                if (restored.State == OrderState.Pending) pendingOrders.Enqueue(restored);
+                else if (restored.State != OrderState.Delivered && restored.State != OrderState.Expired) activeOrders.Add(restored);
+            }
+            generatedOrderSequence = Mathf.Max(0, save.generatedOrderSequence);
+            nextGenerationAt = CurrentTime + (matchConfig != null ? matchConfig.OrderGenerationIntervalSeconds : 8f);
+            OrdersChanged?.Invoke();
+            return true;
+        }
+
         public void BeginDay()
         {
             nextGenerationAt = CurrentTime;
@@ -860,6 +967,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             TraceOrderLifecycle(generatedOrder, "activated");
 
             activeOrders.Add(generatedOrder);
+            AudioManager.Instance?.PlaySfx(AudioCue.Notification);
             OrdersChanged?.Invoke();
         }
 

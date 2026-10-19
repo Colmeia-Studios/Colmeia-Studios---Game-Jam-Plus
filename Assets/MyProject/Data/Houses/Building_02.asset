@@ -14,5 +14,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.HouseData
   id: 07
   customerName: Gabriela
-  description: Red Building
-  houseImage: {fileID: 0}
+  description: Building Number #2
+  houseImage: {fileID: 21300000, guid: 6e9449cf362f81c5a897ffd155c50fa7, type: 3}

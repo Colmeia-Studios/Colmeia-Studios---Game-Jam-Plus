@@ -32,9 +32,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             orderId = order.OrderId;
             orderNameText.text = order.DisplayName;
-            orderNumberText.text = $"PEDIDO #{order.OrderId}";
+            orderNumberText.text = $"#{OrderNumberFormatter.Format(order.OrderId)}";
             remainingTimeText.text = $"{orders.GetRemainingSeconds(order.OrderId):0}s";
-            priceText.text = $"R$ {order.BaseValue:0.00}";
+            priceText.text = $"{order.BaseValue:0.00}";
             houseDescriptionText.text = order.Destination != null
                 ? order.Destination.Description
                 : string.Empty;

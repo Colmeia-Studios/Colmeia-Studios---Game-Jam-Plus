@@ -28,9 +28,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public override string GetInteractionText()
         {
-            if (!IsConfigured) return "Estação de marmita sem tipo válido.";
-            if (!IsUnlocked) return $"Marmita de {CompartmentCount()} compartimento(s) bloqueada.";
-            return $"Interagir para pegar a marmita de {CompartmentCount()} compartimento(s).";
+            if (!IsConfigured) return "Mealbox station has no valid type.";
+            if (!IsUnlocked) return $"The {CompartmentCount()}-compartment mealbox is locked.";
+            return $"Interact to collect the {CompartmentCount()}-compartment mealbox.";
         }
 
         public override bool CanInteract(PlayerController player)
@@ -44,52 +44,52 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (player == null || player.AssignedRole != PlayerRole.Cook) return;
             if (!IsConfigured)
             {
-                player.ShowGameplayMessage("Esta estação de marmita está configurada incorretamente.");
+                player.ShowGameplayMessage("This mealbox station is configured incorrectly.");
                 return;
             }
             if (GameManager.Instance == null)
             {
-                player.ShowGameplayMessage("A configuração da partida não está disponível para validar esta marmita.");
+                player.ShowGameplayMessage("Match configuration is unavailable, so this mealbox cannot be validated.");
                 return;
             }
             if (GameManager.Instance.MatchConfiguration == null)
             {
                 Debug.LogError($"LunchboxStation '{name}' cannot validate unlocks because GameManager has no MatchConfig.", this);
-                player.ShowGameplayMessage("A configuração de desbloqueios da partida está ausente.");
+                player.ShowGameplayMessage("Match unlock configuration is missing.");
                 return;
             }
             if (!IsUnlocked)
             {
-                player.ShowGameplayMessage("Esse tipo de marmita ainda está bloqueado.");
+                player.ShowGameplayMessage("This mealbox type is still locked.");
                 return;
             }
             if (string.IsNullOrWhiteSpace(player.SelectedOrderId) ||
                 !GameManager.Instance.TryGetOrder(player.SelectedOrderId, out OrderRecord order) ||
                 order.State != OrderState.InPreparation)
             {
-                player.ShowGameplayMessage("Selecione um pedido no telefone antes de pegar uma marmita.");
+                player.ShowGameplayMessage("Select an order on the phone before collecting a mealbox.");
                 return;
             }
             if (order.LunchboxType != lunchboxType || player.SelectedLunchboxType != lunchboxType)
             {
-                player.ShowGameplayMessage($"O pedido #{order.OrderId} exige uma marmita de {CompartmentCount(order.LunchboxType)} compartimento(s).");
+                player.ShowGameplayMessage($"Order #{order.OrderId} requires a {CompartmentCount(order.LunchboxType)}-compartment mealbox.");
                 return;
             }
             if (player.PreparationMealbox != null)
             {
-                player.ShowGameplayMessage("Você já pegou a marmita deste pedido.");
+                player.ShowGameplayMessage("You already collected this order’s mealbox.");
                 return;
             }
             if (prefabCatalog == null)
             {
                 Debug.LogError($"LunchboxStation '{name}' não tem LunchboxPrefabCatalog atribuído.", this);
-                player.ShowGameplayMessage("A estação está sem o catálogo de marmitas configurado.");
+                player.ShowGameplayMessage("The mealbox catalog is not assigned to this station.");
                 return;
             }
             if (!prefabCatalog.HasCompleteConfiguration)
             {
                 Debug.LogError($"LunchboxPrefabCatalog '{prefabCatalog.name}' está incompleto. Configure os cinco modelos vazios e os dois fechados.", prefabCatalog);
-                player.ShowGameplayMessage("O catálogo de marmitas está incompleto. Confira os sete prefabs no Inspector.");
+                player.ShowGameplayMessage("The mealbox catalog is incomplete. Check all seven prefabs in the Inspector.");
                 return;
             }
 
@@ -97,7 +97,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (prefab == null)
             {
                 Debug.LogError($"LunchboxPrefabCatalog '{prefabCatalog.name}' não tem prefab vazio para {lunchboxType}.", prefabCatalog);
-                player.ShowGameplayMessage("Não há uma marmita vazia configurada para esta estação.");
+                player.ShowGameplayMessage("No empty mealbox is configured for this station.");
                 return;
             }
 
@@ -108,14 +108,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 Debug.LogError($"Prefab vazio '{prefab.name}' precisa conter MealboxPhysical e cinco slots configurados.", prefab);
                 Destroy(instance);
-                player.ShowGameplayMessage("O prefab da marmita vazia está sem os pontos de compartimento configurados.");
+                player.ShowGameplayMessage("The empty mealbox prefab has no compartment points assigned.");
                 return;
             }
             if (!mealbox.HasCompartmentPoints(order.LunchboxType))
             {
                 Debug.LogError($"Empty prefab '{prefab.name}' has no configured compartment points for {order.LunchboxType}.", prefab);
                 Destroy(instance);
-                player.ShowGameplayMessage("A marmita vazia está sem os pontos de posicionamento dos compartimentos.");
+                player.ShowGameplayMessage("The empty mealbox has no compartment placement points.");
                 return;
             }
 
@@ -127,7 +127,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 return;
             }
 
-            player.ShowGameplayMessage($"Marmita de {CompartmentCount()} compartimento(s) selecionada.");
+            player.ShowGameplayMessage($"Selected the {CompartmentCount()}-compartment mealbox.");
+            AudioManager.Instance?.PlaySfx(AudioCue.EmptyMealboxPickup);
         }
 
         private void Awake()

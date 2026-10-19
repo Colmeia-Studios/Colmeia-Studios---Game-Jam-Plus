@@ -134,7 +134,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                         order.OrderId,
                         StringComparison.OrdinalIgnoreCase))
                 {
-                    Owner.ShowGameplayMessage("Conclua ou descarte a preparação atual antes de iniciar outro pedido.");
+                    Owner.ShowGameplayMessage("Finish or discard the current preparation before starting another order.");
                     return;
                 }
 
@@ -149,7 +149,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (order.State == OrderState.Available && !Owner.StartPreparation(order.OrderId))
             {
-                Owner.ShowGameplayMessage("Não foi possível iniciar a preparação deste pedido.");
+                Owner.ShowGameplayMessage("Could not start preparing this order.");
             }
 
             RefreshRoleOrders();

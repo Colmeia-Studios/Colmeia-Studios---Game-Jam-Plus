@@ -53,6 +53,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField, Range(0, 5)] private int startingReputation = 5;
         [SerializeField, Min(1)] private int dailyDeliveryGoal = 7;
 
+        [Header("Campaign")]
+        [Tooltip("0 means an unbounded campaign. Values 1–30 end the campaign after that day.")]
+        [SerializeField, Range(0, 30)] private int lastCampaignDay = 10;
+        [Tooltip("A role-swap vote is offered after each N completed days. Set to 0 to disable voting.")]
+        [SerializeField, Min(0)] private int roleSwapIntervalDays = 5;
+
         public PlayerConfig PlayerOne => playerOne;
         public PlayerConfig PlayerTwo => playerTwo;
         public IReadOnlyList<OrderData> OrderCatalog => orderCatalog;
@@ -69,6 +75,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public float StartingBalance => startingBalance;
         public int StartingReputation => startingReputation;
         public int DailyDeliveryGoal => dailyDeliveryGoal;
+        /// <summary>Zero means no day limit; 1–30 ends the campaign on that day.</summary>
+        public int LastCampaignDay => Mathf.Clamp(lastCampaignDay, 0, 30);
+        /// <summary>Zero disables role-swap votes.</summary>
+        public int RoleSwapIntervalDays => Mathf.Max(0, roleSwapIntervalDays);
 
         private void OnValidate()
         {
@@ -96,6 +106,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 : Mathf.Max(0f, startingBalance);
             startingReputation = Mathf.Clamp(startingReputation, 0, 5);
             dailyDeliveryGoal = Mathf.Max(1, dailyDeliveryGoal);
+            lastCampaignDay = Mathf.Clamp(lastCampaignDay, 0, 30);
+            roleSwapIntervalDays = Mathf.Max(0, roleSwapIntervalDays);
         }
 
         public bool IsIngredientUnlocked(IngredientData ingredient, int day)

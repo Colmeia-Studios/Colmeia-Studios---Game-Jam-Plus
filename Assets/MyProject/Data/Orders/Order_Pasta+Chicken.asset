@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7431ceabd5f1eec2693db369b417bb52, type: 3}
+  m_Name: Order_Pasta+Chicken
+  m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.OrderData
+  id: 11
+  displayName: Pasta With Chicken
+  lunchboxType: 0
+  requiredIngredients:
+  - {fileID: 11400000, guid: 9923762c7362b6c8b9576ad77fef71f3, type: 2}
+  - {fileID: 11400000, guid: dcd0bb72d2c54041fb3f546c6467592f, type: 2}

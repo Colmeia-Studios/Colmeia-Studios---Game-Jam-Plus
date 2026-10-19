@@ -4,7 +4,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 {
     public abstract class Interactable : MonoBehaviour
     {
-        [SerializeField] protected string interactionText = "Pressione E para interagir.";
+        [SerializeField] protected string interactionText = "Press E to interact.";
         [SerializeField] protected bool canInteract = true;
 
         public virtual bool CanInteract(PlayerController player)

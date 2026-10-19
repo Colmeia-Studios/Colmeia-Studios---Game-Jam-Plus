@@ -75,10 +75,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             DailyMatchResult result = gameManager.LatestDailyResult;
             bool isVisible = result != null &&
-                             (gameManager.CycleState == MatchCycleState.ResultsWaiting ||
-                              gameManager.CycleState == MatchCycleState.GameOver);
+                             gameManager.CycleState == MatchCycleState.ResultsWaiting;
+            bool wasVisible = resultsPanel != null && resultsPanel.activeSelf;
             if (resultsPanel != null && resultsPanel.activeSelf != isVisible)
                 resultsPanel.SetActive(isVisible);
+            if (isVisible && !wasVisible)
+                AudioManager.Instance?.PlaySfx(AudioCue.DayEnd);
 
             if (!isVisible)
                 return;
@@ -110,7 +112,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 Debug.LogError(
                     "DailyResultsUI: atribua Results Panel, Day Text, Deliveries Text, Goal Text, Goal Status Text, " +
                     "Money Earned Text, Closing Balance Text, Reputation Text e Continue Button no Inspector. " +
-                    "Expired Orders Text é opcional.", this);
+                    "Expired Orders Text is optional.", this);
                 reportedMissingReferences = true;
             }
         }

@@ -13,7 +13,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public override string GetInteractionText()
         {
-            return "Interagir para limpar a marmita em preparação.";
+            return "Interact to clear the mealbox in preparation.";
         }
 
         public override void Interact(PlayerController player)

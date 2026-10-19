@@ -41,6 +41,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Update()
         {
+            if (Time.timeScale <= 0f) return;
             if (gameManager == null || !gameManager.IsRoleSwapVoteActive)
                 return;
 
@@ -130,7 +131,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             else if (state == MatchCycleState.RoleSwapCountdown)
             {
                 SetText(countdownText, $"{Mathf.CeilToInt(gameManager.RoleSwapCountdownRemaining)}");
-                SetText(resultText, "Durante a contagem, cada jogador pode alternar sua escolha com B / botão direito.");
+                SetText(resultText, "During the countdown, each player can toggle their choice with B / right mouse button.");
             }
             else
             {
@@ -194,7 +195,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 case RoleSwapVote.Yes: return "Swap";
                 case RoleSwapVote.No: return "Keep";
-                default: return "Waiting Choose";
+                default: return "Waiting for choice";
             }
         }
 

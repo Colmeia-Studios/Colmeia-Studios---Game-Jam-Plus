@@ -25,7 +25,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
         [SerializeField] private TMP_Text houseDescriptionText;
         [SerializeField] private TMP_Text orderValueText;
         [SerializeField] private Image housePhoto;
-        [SerializeField] private Button backButton;
 
         private readonly List<KifomeDeliveryCardUI> orderCards = new List<KifomeDeliveryCardUI>();
         private readonly List<OrderRecord> visibleOrders = new List<OrderRecord>();
@@ -44,8 +43,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             !orderDetailsView.transform.IsChildOf(deliveryListView.transform) &&
             orderNumberText != null &&
             mealNameText != null &&
-            remainingTimeText != null &&
-            backButton != null;
+            remainingTimeText != null;
 
         protected override void ShowPrimaryViewContent()
         {
@@ -83,26 +81,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 Debug.LogError("Delivery Expand is missing its meal name text.", this);
             if (remainingTimeText == null)
                 Debug.LogError("Delivery Expand is missing its remaining time text.", this);
-            if (backButton == null)
-                Debug.LogError("Delivery Expand is missing its return button.", this);
-        }
-
-        protected override void BindRoleListeners()
-        {
-            if (backButton != null)
-            {
-                backButton.onClick.RemoveListener(ShowDeliveryList);
-                backButton.onClick.AddListener(ShowDeliveryList);
-            }
-        }
-
-        protected override void UnbindRoleListeners()
-        {
-            if (backButton != null)
-            {
-                backButton.onClick.RemoveListener(ShowDeliveryList);
-            }
-        }
+         }
 
         protected override void RefreshRoleOrders()
         {
@@ -164,13 +143,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             HouseData destination = order.Destination;
             SetOptionalText(customerNameText, destination != null ? destination.CustomerName : null);
-            orderNumberText.text = $"PEDIDO #{order.OrderId}";
+            orderNumberText.text = $"#{OrderNumberFormatter.Format(order.OrderId)}";
             mealNameText.text = order.DisplayName;
             remainingTimeText.text = $"{Orders.GetRemainingSeconds(order.OrderId):0}s";
             SetOptionalText(
                 houseDescriptionText,
                 destination != null ? destination.Description : null);
-            SetOptionalText(orderValueText, $"Valor-base: R$ {order.BaseValue:0.00}");
+            SetOptionalText(orderValueText, $"{order.BaseValue:0.00}");
 
             Sprite image = destination != null ? destination.HouseImage : null;
             if (housePhoto != null)
@@ -183,11 +162,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         protected override void AddRoleButtonsToNavigation()
         {
-            if (orderDetailsView != null && orderDetailsView.activeInHierarchy)
-            {
-                AddNavigableButton(backButton);
-                return;
-            }
 
             if (deliveryListView == null || !deliveryListView.activeInHierarchy)
             {

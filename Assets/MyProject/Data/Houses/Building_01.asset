@@ -14,5 +14,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.HouseData
   id: 06
   customerName: Leocadia
-  description: Blue Building
-  houseImage: {fileID: 0}
+  description: Building Number #1
+  houseImage: {fileID: 21300000, guid: 7a563ec35770937ee95dffe2b6c75e7c, type: 3}

@@ -15,10 +15,20 @@ MonoBehaviour:
   playerOne: {fileID: 11400000, guid: 18f2bd0d09804ce50a4a3467d666f029, type: 2}
   playerTwo: {fileID: 11400000, guid: c720880547332c70987bf9ee5aac6a1d, type: 2}
   orderCatalog:
-  - {fileID: 11400000, guid: 9e86f23d8052f86b082b7d8ac900ee17, type: 2}
+  - {fileID: 11400000, guid: bae234bc39b32e330901ab11ab6e9c14, type: 2}
+  - {fileID: 11400000, guid: f05cc4ccc1fe90351847e7a5ff6504ef, type: 2}
+  - {fileID: 11400000, guid: 3989864c171d72da29b1e037dc3b8978, type: 2}
+  - {fileID: 11400000, guid: f2fcb31255eac85fb99eaa3ca6caf54f, type: 2}
   - {fileID: 11400000, guid: 8e92fb774ed281e4881f4cc1cb2d995f, type: 2}
   - {fileID: 11400000, guid: fdf88cd5187d1c21fb516edfb4dd9224, type: 2}
+  - {fileID: 11400000, guid: 2d6de57eafb0259d18cd9550c30afc98, type: 2}
+  - {fileID: 11400000, guid: 000659a006ad63e63a25a751dd9163da, type: 2}
+  - {fileID: 11400000, guid: 5de7e79876a6cecd98ab1ca9e9291d04, type: 2}
+  - {fileID: 11400000, guid: 242734d27b25f2356b84a6449f1247a1, type: 2}
+  - {fileID: 11400000, guid: 832e53c3c23d61a4493a357f5cb39584, type: 2}
+  - {fileID: 11400000, guid: 8c4081379003d1a77922683ff0796f88, type: 2}
   - {fileID: 11400000, guid: 618ab15faec0ff31985f836be5ad6d46, type: 2}
+  - {fileID: 11400000, guid: 9e86f23d8052f86b082b7d8ac900ee17, type: 2}
   houseCatalog:
   - {fileID: 11400000, guid: 9edd9bc29a8546d55b9255f94b681b01, type: 2}
   - {fileID: 11400000, guid: bb9625527af66f89396406e427e60cec, type: 2}
@@ -47,6 +57,9 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 87123c5c3487169aa96d2b07b8dbd536, type: 2}
   - {fileID: 11400000, guid: 3c58d8b908353eb31b73428339f38d11, type: 2}
   - {fileID: 11400000, guid: 6144571f2ad487cddb3e0f878170f1ee, type: 2}
+  - {fileID: 11400000, guid: f435d80388a72489a9defd6822e4d059, type: 2}
+  - {fileID: 11400000, guid: c048c8490992768dbaa316e197cc951c, type: 2}
+  - {fileID: 11400000, guid: 91b51cffbff946ccfb2a6e8ac3865843, type: 2}
   maximumActiveOrders: 5
   orderGenerationIntervalSeconds: 8
   orderDeadlineSeconds: 100
@@ -84,8 +97,10 @@ MonoBehaviour:
     availableFromDay: 15
   startHour: 11
   endHour: 19
-  realSecondsPerGameHour: 30
+  realSecondsPerGameHour: 2
   nextDayTransitionSeconds: 1
   startingBalance: 50
-  startingReputation: 5
+  startingReputation: 1
   dailyDeliveryGoal: 10
+  lastCampaignDay: 10
+  roleSwapIntervalDays: 5

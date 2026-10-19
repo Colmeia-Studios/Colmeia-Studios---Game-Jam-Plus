@@ -16,7 +16,7 @@ MonoBehaviour:
   actionMap: PlayerTwo
   controlScheme: Gamepad
   useMouseLook: 0
-  moveSpeed: 8.5
+  moveSpeed: 15
   gravity: -20
   lookSensitivity: 2.2
   minPitch: -80

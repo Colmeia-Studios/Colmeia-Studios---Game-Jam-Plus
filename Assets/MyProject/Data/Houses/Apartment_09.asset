@@ -15,4 +15,4 @@ MonoBehaviour:
   id: 18
   customerName: Emerson
   description: Apartment - Number #9
-  houseImage: {fileID: 0}
+  houseImage: {fileID: 21300000, guid: 9d60292985492afbc8608777acb5bd72, type: 3}

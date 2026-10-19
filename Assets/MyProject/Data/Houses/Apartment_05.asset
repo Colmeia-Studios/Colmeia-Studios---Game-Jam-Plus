@@ -15,4 +15,4 @@ MonoBehaviour:
   id: 14
   customerName: "Jos\xE9"
   description: Apartment - Number #5
-  houseImage: {fileID: 0}
+  houseImage: {fileID: 21300000, guid: b4d2e925106ff2e70b6998c443481614, type: 3}

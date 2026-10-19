@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -45,6 +46,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         private InputAction confirmAction;
         private InputAction cancelAction;
         private InputAction togglePhoneAction;
+        private InputAction openSettingsAction;
         private string selectedOrderId;
         private string preparationMessage;
         private float preparationStartedAt;
@@ -66,7 +68,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public event Action DeliverySelectionChanged;
         public event Action GameplayMessageChanged;
         public PlayerRole AssignedRole => assignedRole;
-        public bool UsesMouseAndKeyboard => controlScheme == "KeyboardMouse";
+        public bool UsesMouseAndKeyboard => controlScheme == "KeyboardMouse" ||
+                                            controlScheme == "GamepadKeyboardMouse";
         public string SelectedOrderId => selectedOrderId;
         public bool IsPreparationPresentationVisible => preparationPresentationVisible;
         public string CarriedOrderId => selectedDeliveryOrderId;
@@ -147,9 +150,6 @@ namespace ColmeiaStudios.SoMaisUmPedido
             if (playerInput == null || !playerInput.user.valid)
                 return false;
 
-            if (controlScheme == "Gamepad")
-                return cancelAction != null && cancelAction.WasPressedThisFrame();
-
             // Read only the devices paired to this PlayerInput. This keeps each slot's
             // vote independent even when the machine has other keyboards/mice connected.
             foreach (InputDevice pairedDevice in playerInput.user.pairedDevices)
@@ -157,6 +157,8 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 if (pairedDevice is Keyboard keyboard && keyboard.bKey.wasPressedThisFrame)
                     return true;
                 if (pairedDevice is Mouse mouse && mouse.rightButton.wasPressedThisFrame)
+                    return true;
+                if (pairedDevice is Gamepad gamepad && gamepad.buttonEast.wasPressedThisFrame)
                     return true;
             }
 
@@ -173,6 +175,48 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             return playerInput != null && playerInput.user.valid &&
                    cancelAction != null && cancelAction.WasPressedThisFrame();
+        }
+
+        public bool WasOpenSettingsPressedThisFrame()
+        {
+            return playerInput != null && playerInput.user.valid &&
+                   openSettingsAction != null && openSettingsAction.WasPressedThisFrame();
+        }
+
+        public bool HasPairedDeviceInCommon(PlayerController other, out string deviceName)
+        {
+            deviceName = null;
+            if (other == null || playerInput == null || other.playerInput == null ||
+                !playerInput.user.valid || !other.playerInput.user.valid)
+                return false;
+            foreach (InputDevice mine in playerInput.user.pairedDevices)
+                foreach (InputDevice theirs in other.playerInput.user.pairedDevices)
+                    if (mine == theirs)
+                    {
+                        deviceName = mine.displayName;
+                        return true;
+                    }
+            return false;
+        }
+
+        public bool HasExpectedInputPairing(string expectedScheme, params InputDevice[] expectedDevices)
+        {
+            if (playerInput == null || !playerInput.user.valid || playerInput.currentControlScheme != expectedScheme ||
+                expectedDevices == null || playerInput.user.pairedDevices.Count != expectedDevices.Length)
+                return false;
+            foreach (InputDevice expected in expectedDevices)
+                if (expected == null || !playerInput.user.pairedDevices.Contains(expected)) return false;
+            return true;
+        }
+
+        public string DescribeInputPairingForDiagnostics()
+        {
+            if (playerInput == null || !playerInput.user.valid)
+                return "PlayerInput/InputUser unavailable";
+
+            string paired = string.Join(", ", playerInput.user.pairedDevices.Select(device =>
+                $"{device.displayName} (id={device.deviceId}, layout={device.layout}, added={device.added})"));
+            return $"scheme={playerInput.currentControlScheme}; paired=[{paired}]";
         }
 
         private void Awake()
@@ -302,6 +346,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool ConfigureMatchInput(PlayerRole role, PlayerConfig config, InputDevice device, Mouse assignedMouse, string scheme)
         {
+            return ConfigureMatchInput(role, config, device, assignedMouse,
+                device as Keyboard, scheme);
+        }
+
+        public bool ConfigureMatchInput(PlayerRole role, PlayerConfig config, InputDevice device,
+            Mouse assignedMouse, Keyboard assignedKeyboard, string scheme)
+        {
             if (playerInput == null || playerInput.actions == null || device == null || !device.added)
             {
                 Debug.LogError($"PlayerInput, Input Actions, or assigned input device is missing/invalid for {name}.", this);
@@ -321,15 +372,23 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 actionMap = "PlayerOne";
                 assignedDevices = new InputDevice[] { device, assignedMouse };
             }
+            else if (scheme == "GamepadKeyboardMouse" && device is Gamepad &&
+                     assignedKeyboard != null && assignedKeyboard.added &&
+                     assignedMouse != null && assignedMouse.added &&
+                     assignedKeyboard != device && assignedMouse != device)
+            {
+                actionMap = "PlayerOne";
+                assignedDevices = new InputDevice[] { device, assignedKeyboard, assignedMouse };
+            }
             else
             {
-                Debug.LogError($"Atribuição inválida de dispositivo/esquema para {name}: {scheme}.", this);
+                Debug.LogError($"Invalid device/control scheme assignment for {name}: {scheme}.", this);
                 return false;
             }
 
             if (playerInput.actions.FindActionMap(actionMap, false) == null)
             {
-                Debug.LogError($"Action Map '{actionMap}' não existe no PlayerInput de {name}.", this);
+                Debug.LogError($"Action Map '{actionMap}' was not found on PlayerInput for {name}.", this);
                 return false;
             }
 
@@ -345,7 +404,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (!schemeExists || !playerInput.user.valid)
             {
-                Debug.LogError($"Control Scheme '{scheme}' ou InputUser inválido em {name}.", this);
+                Debug.LogError($"Control Scheme '{scheme}' or InputUser is invalid on {name}.", this);
                 return false;
             }
 
@@ -359,14 +418,14 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
             catch (Exception exception)
             {
-                Debug.LogError($"Falha ao parear dispositivos de {name}: {exception.Message}", this);
+                Debug.LogError($"Could not pair devices for {name}: {exception.Message}", this);
                 return false;
             }
 
             if (playerInput.currentControlScheme != scheme ||
                 playerInput.user.pairedDevices.Count != assignedDevices.Length)
             {
-                Debug.LogError($"O PlayerInput de {name} não manteve o pareamento solicitado ({scheme}).", this);
+                Debug.LogError($"PlayerInput on {name} did not retain the requested pairing ({scheme}).", this);
                 return false;
             }
 
@@ -384,12 +443,12 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
                 if (!isPaired)
                 {
-                    Debug.LogError($"O dispositivo {assignedDevices[i].displayName} não foi pareado a {name}.", this);
+                    Debug.LogError($"Device {assignedDevices[i].displayName} was not paired to {name}.", this);
                     return false;
                 }
             }
 
-            Configure(role, config, scheme == "KeyboardMouse", actionMap, scheme);
+            Configure(role, config, scheme != "Gamepad", actionMap, scheme);
             return isConfigured;
         }
 
@@ -414,8 +473,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
             confirmAction = FindRequiredAction(actionMap, "Confirm");
             cancelAction = FindRequiredAction(actionMap, "Cancel");
             togglePhoneAction = FindRequiredAction(actionMap, "TogglePhone");
+            openSettingsAction = FindRequiredAction(actionMap, "OpenSettings");
             return moveAction != null && lookAction != null && interactAction != null &&
-                   confirmAction != null && cancelAction != null && togglePhoneAction != null;
+                   confirmAction != null && cancelAction != null && togglePhoneAction != null &&
+                   openSettingsAction != null;
         }
 
         private InputAction FindRequiredAction(InputActionMap actionMap, string actionName)
@@ -423,7 +484,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             InputAction action = actionMap.FindAction(actionName, false);
             if (action == null)
             {
-                Debug.LogError($"A ação obrigatória '{actionName}' não existe no Action Map '{actionMap.name}' ({name}).", this);
+                Debug.LogError($"Required action '{actionName}' was not found in Action Map '{actionMap.name}' ({name}).", this);
             }
 
             return action;
@@ -431,7 +492,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         private void Update()
         {
-            if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            if (Time.timeScale <= 0f)
+                return;
+            if (GameManager.Instance != null && GameManager.Instance.IsMatchEnded)
             {
                 velocity = Vector3.zero;
                 UpdateCharacterLocomotion(false);
@@ -540,6 +603,132 @@ namespace ColmeiaStudios.SoMaisUmPedido
             return playerCamera;
         }
 
+        public CampaignPlayerData CaptureCampaignState(float currentTime)
+        {
+            var data = new CampaignPlayerData
+            {
+                role = assignedRole, selectedOrderId = selectedOrderId,
+                selectedLunchboxType = selectedLunchboxType,
+                selectedDeliveryOrderId = selectedDeliveryOrderId,
+                selectedPickupOrderId = selectedPickupOrderId,
+                carriedPreparedOrderId = carriedPreparedMealbox != null ? carriedPreparedMealbox.OrderId : null,
+                carriedClosedVisualVariant = carriedPreparedMealbox != null ? carriedPreparedMealbox.ClosedVisualVariant : -1,
+                preparationMealboxOrderId = preparationMealbox != null ? preparationMealbox.OrderId : null,
+                preparationElapsedSeconds = Mathf.Max(0f, currentTime - preparationStartedAt)
+            };
+            data.ingredients.AddRange(currentIngredients);
+            data.carriedOrderIds.AddRange(carriedOrderIds);
+            return data;
+        }
+
+        public bool RestoreCampaignState(CampaignPlayerData data, PickupCounter counter, GameManager match)
+        {
+            if (data == null || counter == null || match == null) return false;
+            if (!System.Enum.IsDefined(typeof(PlayerRole), data.role) || data.role !=
+                (this == match.PlayerOne ? MatchSettings.PlayerOneRole : MatchSettings.PlayerTwoRole))
+                return false;
+            SetRoleForRotation(data.role);
+            selectedOrderId = match.TryGetOrder(data.selectedOrderId, out OrderRecord savedSelected) &&
+                              savedSelected.State == OrderState.InPreparation ? data.selectedOrderId : null;
+            selectedLunchboxType = data.selectedLunchboxType;
+            selectedDeliveryOrderId = data.selectedDeliveryOrderId;
+            selectedPickupOrderId = data.selectedPickupOrderId;
+            currentIngredients.Clear(); currentIngredientData.Clear();
+            carriedOrderIds.Clear();
+            if (data.carriedOrderIds != null)
+            {
+                foreach (string id in data.carriedOrderIds)
+                    if (!string.IsNullOrWhiteSpace(id) && !ContainsOrderId(id) &&
+                        match.TryGetOrder(id, out OrderRecord order) && order.State == OrderState.InDelivery &&
+                        carriedOrderIds.Count < InventoryCapacity)
+                        carriedOrderIds.Add(id);
+            }
+            if (selectedDeliveryOrderId != null && !ContainsOrderId(selectedDeliveryOrderId))
+                selectedDeliveryOrderId = carriedOrderIds.Count > 0 ? carriedOrderIds[0] : null;
+            if (!string.IsNullOrWhiteSpace(selectedPickupOrderId) &&
+                (!match.TryGetOrder(selectedPickupOrderId, out OrderRecord pickup) || pickup.State != OrderState.ReadyForPickup))
+                selectedPickupOrderId = null;
+
+            if (!string.IsNullOrWhiteSpace(data.preparationMealboxOrderId) &&
+                match.TryGetOrder(data.preparationMealboxOrderId, out OrderRecord prepOrder) && prepOrder.State == OrderState.InPreparation)
+            {
+                selectedOrderId = prepOrder.OrderId;
+                selectedLunchboxType = prepOrder.LunchboxType;
+                preparationStartedAt = match.ElapsedSeconds - Mathf.Max(0f, data.preparationElapsedSeconds);
+                if (data.ingredients != null)
+                {
+                    var uniqueIngredients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (string ingredientId in data.ingredients)
+                    {
+                        string normalized = IngredientStation.NormalizeLegacyId(ingredientId);
+                        bool required = false;
+                        foreach (string requiredId in prepOrder.RequiredIngredientIds)
+                            if (string.Equals(requiredId, normalized, StringComparison.OrdinalIgnoreCase)) { required = true; break; }
+                        if (required && uniqueIngredients.Add(normalized) && match.IsIngredientIdUnlocked(normalized))
+                            currentIngredients.Add(normalized);
+                        else
+                            Debug.LogWarning($"Saved ingredient '{ingredientId}' was skipped while restoring order '{prepOrder.OrderId}'.", this);
+                    }
+                }
+                MealboxPhysical empty = counter.CreateCampaignMealbox(prepOrder, false);
+                if (empty != null)
+                {
+                    preparationMealbox = empty;
+                    Transform point = mealboxPreparationPoint != null ? mealboxPreparationPoint : transform;
+                    empty.transform.SetParent(point, false);
+                    empty.transform.localPosition = mealboxPreparationPoint != null ? Vector3.zero : new Vector3(0f, 0.9f, 0.45f);
+                    empty.SetAttachedToPlayer(true);
+                    for (int i = 0; i < currentIngredients.Count; i++)
+                    {
+                        IngredientData ingredient = FindIngredientData(currentIngredients[i], match.MatchConfiguration);
+                        if (ingredient != null)
+                        {
+                            currentIngredientData.Add(ingredient);
+                            int slot = IndexOfIngredient(prepOrder, currentIngredients[i]);
+                            if (slot >= 0) empty.TryAddIngredientVisual(ingredient, slot);
+                        }
+                        else currentIngredientData.Add(null);
+                    }
+                }
+                else
+                {
+                    Debug.LogError($"Could not restore preparation mealbox for order '{prepOrder.OrderId}'. Check the empty prefab for {prepOrder.LunchboxType}.", this);
+                    return false;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(data.carriedPreparedOrderId) &&
+                match.TryGetOrder(data.carriedPreparedOrderId, out OrderRecord carried) && carried.State == OrderState.ReadyForCookPickup)
+            {
+                MealboxPhysical closed = counter.CreateCampaignMealbox(carried, true, data.carriedClosedVisualVariant);
+                if (closed == null || !TryCarryPreparedMealbox(closed))
+                {
+                    if (closed != null) Destroy(closed.gameObject);
+                    Debug.LogError($"Could not restore Cook-carried mealbox for order '{carried.OrderId}'. Check both closed prefabs.", this);
+                    return false;
+                }
+            }
+            preparationPresentationVisible = true;
+            PreparationChanged?.Invoke(); InventoryChanged?.Invoke(); DeliverySelectionChanged?.Invoke();
+            return true;
+        }
+
+        private static IngredientData FindIngredientData(string id, MatchConfig config)
+        {
+            if (config == null || config.IngredientUnlocks == null) return null;
+            foreach (IngredientUnlockRule rule in config.IngredientUnlocks)
+                if (rule != null && rule.Ingredient != null &&
+                    string.Equals(IngredientStation.NormalizeLegacyId(rule.Ingredient.Id), id, StringComparison.OrdinalIgnoreCase))
+                    return rule.Ingredient;
+            return null;
+        }
+
+        private static int IndexOfIngredient(OrderRecord order, string id)
+        {
+            for (int i = 0; i < order.RequiredIngredientIds.Count; i++)
+                if (string.Equals(order.RequiredIngredientIds[i], id, StringComparison.OrdinalIgnoreCase)) return i;
+            return -1;
+        }
+
         public bool TryAddIngredient(string ingredientId, string displayName, GameObject visualPrefab = null)
         {
             if (!HasActivePreparation || preparationMealbox == null ||
@@ -547,42 +736,44 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 string.IsNullOrWhiteSpace(ingredientId) || completingPreparation)
             {
                 if (HasActivePreparation && preparationMealbox == null)
-                    ShowGameplayMessage("Pegue a marmita correta na estação antes de adicionar ingredientes.");
+                    ShowGameplayMessage("Collect the correct mealbox from its station before adding ingredients.");
                 return false;
             }
 
             if (GameManager.Instance != null && !GameManager.Instance.IsIngredientIdUnlocked(ingredientId))
             {
-                ShowGameplayMessage($"Ingrediente bloqueado: {displayName}.");
+                ShowGameplayMessage($"Ingredient locked: {displayName}.");
                 return false;
             }
 
             string normalizedId = IngredientStation.NormalizeLegacyId(ingredientId);
             if (HasIngredient(normalizedId))
             {
-                ShowGameplayMessage($"{displayName} já foi adicionado a esta receita.");
+                ShowGameplayMessage($"{displayName} has already been added to this recipe.");
                 return false;
             }
 
             if (!TryGetRequiredIngredientSlot(normalizedId, out int visualSlot))
             {
-                ShowGameplayMessage($"{displayName} não faz parte da receita selecionada.");
+                ShowGameplayMessage($"{displayName} is not part of the selected recipe.");
                 return false;
             }
 
             if (preparationMealbox != null && visualPrefab != null &&
                 !preparationMealbox.TryAddIngredientVisual(visualPrefab, visualSlot))
             {
-                ShowGameplayMessage("Não foi possível posicionar o modelo do ingrediente na marmita. Confira os pontos dos compartimentos.");
+                ShowGameplayMessage("Could not place the ingredient model in the mealbox. Check the compartment points.");
                 return false;
             }
 
             currentIngredients.Add(normalizedId);
             currentIngredientData.Add(null);
-            preparationMessage = $"Adicionado: {displayName}.";
+            preparationMessage = $"Added: {displayName}.";
             PreparationChanged?.Invoke();
             Debug.Log($"{name} adicionou o ingrediente '{displayName}' (total: {currentIngredients.Count}).");
             TryCompletePreparationIfExact();
+            if (!string.IsNullOrWhiteSpace(selectedOrderId))
+                AudioManager.Instance?.PlaySfx(AudioCue.IngredientPlaced);
             return true;
         }
 
@@ -592,41 +783,43 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 preparationMealbox.IsClosed || preparationMealbox.Type != selectedLunchboxType || completingPreparation)
             {
                 if (HasActivePreparation && preparationMealbox == null)
-                    ShowGameplayMessage("Pegue a marmita correta na estação antes de adicionar ingredientes.");
+                    ShowGameplayMessage("Collect the correct mealbox from its station before adding ingredients.");
                 return false;
             }
 
             if (GameManager.Instance != null && !GameManager.Instance.IsIngredientUnlocked(ingredient))
             {
-                ShowGameplayMessage($"Ingrediente bloqueado: {ingredient.DisplayName}.");
+                ShowGameplayMessage($"Ingredient locked: {ingredient.DisplayName}.");
                 return false;
             }
 
             string normalizedId = IngredientStation.NormalizeLegacyId(ingredient.Id);
             if (HasIngredient(normalizedId))
             {
-                ShowGameplayMessage($"{ingredient.DisplayName} já foi adicionado a esta receita.");
+                ShowGameplayMessage($"{ingredient.DisplayName} has already been added to this recipe.");
                 return false;
             }
 
             if (!TryGetRequiredIngredientSlot(normalizedId, out int visualSlot))
             {
-                ShowGameplayMessage($"{ingredient.DisplayName} não faz parte da receita selecionada.");
+                ShowGameplayMessage($"{ingredient.DisplayName} is not part of the selected recipe.");
                 return false;
             }
 
             if (preparationMealbox != null && ingredient.VisualPrefab != null &&
                 !preparationMealbox.TryAddIngredientVisual(ingredient, visualSlot))
             {
-                ShowGameplayMessage("Não foi possível posicionar o modelo do ingrediente na marmita. Confira os pontos dos compartimentos.");
+                ShowGameplayMessage("Could not place the ingredient model in the mealbox. Check the compartment points.");
                 return false;
             }
 
             currentIngredients.Add(normalizedId);
             currentIngredientData.Add(ingredient);
-            preparationMessage = $"Adicionado: {ingredient.DisplayName}.";
+            preparationMessage = $"Added: {ingredient.DisplayName}.";
             PreparationChanged?.Invoke();
             TryCompletePreparationIfExact();
+            if (!string.IsNullOrWhiteSpace(selectedOrderId))
+                AudioManager.Instance?.PlaySfx(AudioCue.IngredientPlaced);
             return true;
         }
 
@@ -663,7 +856,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             ClearIngredients();
-            preparationMessage = "Marmita limpa. Continue a preparação deste pedido.";
+            preparationMessage = "Mealbox cleared. Continue preparing this order.";
             ShowGameplayMessage(preparationMessage);
             PreparationChanged?.Invoke();
         }
@@ -674,7 +867,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 GameManager.Instance == null ||
                 !GameManager.Instance.TryStartNextPreparation(out OrderRecord order))
             {
-                preparationMessage = "Nenhum pedido disponível para preparar.";
+                preparationMessage = "No order is available to prepare.";
                 return false;
             }
 
@@ -683,7 +876,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             preparationStartedAt = GameManager.Instance.ElapsedSeconds;
             selectedLunchboxType = order.LunchboxType;
             ClearIngredients();
-            preparationMessage = $"Pedido #{order.OrderId}: pegue a marmita de {GetCompartmentCount(order.LunchboxType)} compartimento(s) na estação.";
+            preparationMessage = $"Order {OrderNumberFormatter.Format(order.OrderId)}: collect the {GetCompartmentCount(order.LunchboxType)}-compartment mealbox from its station.";
             selectedLunchboxType = order.LunchboxType;
             PreparationChanged?.Invoke();
             return true;
@@ -696,7 +889,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 !GameManager.Instance.TryStartPreparation(orderId) ||
                 !GameManager.Instance.TryGetOrder(orderId, out OrderRecord order))
             {
-                preparationMessage = "Não foi possível iniciar a preparação deste pedido.";
+                preparationMessage = "Could not start preparing this order.";
                 return false;
             }
 
@@ -705,7 +898,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             preparationStartedAt = GameManager.Instance.ElapsedSeconds;
             selectedLunchboxType = order.LunchboxType;
             ClearIngredients();
-            preparationMessage = $"Pedido #{order.OrderId}: pegue a marmita de {GetCompartmentCount(order.LunchboxType)} compartimento(s) na estação.";
+            preparationMessage = $"Order {OrderNumberFormatter.Format(order.OrderId)}: collect the {GetCompartmentCount(order.LunchboxType)}-compartment mealbox from its station.";
             PreparationChanged?.Invoke();
             return true;
         }
@@ -737,6 +930,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             }
 
             preparationMessage = result;
+            AudioManager.Instance?.PlaySfx(AudioCue.IngredientPlaced);
             preparationMealbox = null;
             ShowGameplayMessage(result);
             selectedOrderId = null;
@@ -773,7 +967,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             MealboxPhysical mealbox = carriedPreparedMealbox;
             carriedPreparedMealbox = null;
             if (mealbox != null) mealbox.SetAttachedToPlayer(false);
-            preparationMessage = "Marmita depositada no balcão.";
+            preparationMessage = "Mealbox deposited at the counter.";
             PreparationChanged?.Invoke();
             if (tryCompletePreparation) TryCompletePendingPreparation();
             return mealbox;
@@ -781,7 +975,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
         public bool TryTakeEmptyMealbox(MealboxPhysical mealbox, OrderRecord order, out string result)
         {
-            result = "Não foi possível pegar esta marmita.";
+            result = "Could not collect this mealbox.";
             if (assignedRole != PlayerRole.Cook || mealbox == null || order == null || !HasActivePreparation ||
                 preparationMealbox != null ||
                 !string.Equals(order.OrderId, selectedOrderId, StringComparison.OrdinalIgnoreCase) ||
@@ -799,7 +993,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             mealbox.transform.localPosition = mealboxPreparationPoint != null ? Vector3.zero : new Vector3(0f, 0.9f, 0.45f);
             mealbox.transform.localRotation = Quaternion.identity;
             mealbox.SetAttachedToPlayer(true);
-            preparationMessage = $"Marmita correta selecionada para o pedido #{order.OrderId}.";
+            preparationMessage = $"Correct mealbox selected for order {OrderNumberFormatter.Format(order.OrderId)}.";
             PreparationChanged?.Invoke();
             result = preparationMessage;
             return true;
@@ -820,7 +1014,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             preparationMealbox = null;
             emptyMealbox.gameObject.SetActive(false);
             Destroy(emptyMealbox.gameObject);
-            preparationMessage = $"Pedido #{orderId} pronto. Leve a marmita fechada até o balcão.";
+            preparationMessage = $"Order {OrderNumberFormatter.Format(orderId)} is ready. Take the closed mealbox to the counter.";
             PreparationChanged?.Invoke();
             return true;
         }
@@ -840,7 +1034,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             carriedPreparedMealbox = null;
             if (mealbox != null)
                 Destroy(mealbox.gameObject);
-            preparationMessage = "A marmita expirou antes de ser depositada.";
+            preparationMessage = "The mealbox expired before it was deposited.";
             PreparationChanged?.Invoke();
         }
 
@@ -962,7 +1156,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 Destroy(preparationMealbox.gameObject);
             preparationMealbox = null;
             ClearIngredients();
-            preparationMessage = "Preparação cancelada; o pedido voltou à lista.";
+            preparationMessage = "Preparation canceled; the order returned to the list.";
             PreparationChanged?.Invoke();
         }
 
@@ -970,13 +1164,13 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             if (HasActivePreparation && type != selectedLunchboxType)
             {
-                ShowGameplayMessage("O tipo de marmita é definido pelo pedido selecionado e não pode ser trocado durante a preparação.");
+                ShowGameplayMessage("The selected order determines the mealbox type; it cannot be changed during preparation.");
                 return;
             }
 
             if (GameManager.Instance != null && !GameManager.Instance.IsLunchboxUnlocked(type))
             {
-                ShowGameplayMessage("Esse tipo de marmita ainda está bloqueado.");
+                ShowGameplayMessage("This mealbox type is still locked.");
                 return;
             }
 
@@ -985,7 +1179,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 GameManager.Instance.TryGetOrder(selectedOrderId, out OrderRecord order) &&
                 order.LunchboxType != type)
             {
-                preparationMessage = "Tipo de marmita diferente do pedido.";
+                preparationMessage = "Mealbox type does not match the order.";
             }
 
             PreparationChanged?.Invoke();
@@ -1009,7 +1203,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
             {
                 if (carriedOrderIds.Count >= InventoryCapacity)
                 {
-                    ShowGameplayMessage("Mochila cheia: limite de três marmitas.");
+                    ShowGameplayMessage("Backpack full: maximum of three mealboxes.");
                 }
 
                 return false;
@@ -1146,7 +1340,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 }
                 preparationMealbox = null;
                 ClearIngredients();
-                preparationMessage = $"A preparação do pedido #{expiredPreparationId} não está mais ativa.";
+                preparationMessage = $"Preparation for order #{expiredPreparationId} is no longer active.";
                 ShowGameplayMessage(preparationMessage);
             }
 

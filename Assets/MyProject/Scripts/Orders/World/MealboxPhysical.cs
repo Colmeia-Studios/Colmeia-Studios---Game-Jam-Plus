@@ -27,6 +27,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
         public string OrderId => orderId;
         public string OrderDisplayName => orderDisplayName;
         public LunchboxType Type => lunchboxType;
+        public int ClosedVisualVariant { get; private set; } = -1;
         public bool IsClosed => isClosed;
 
         public void Configure(string id, string displayName)
@@ -50,9 +51,10 @@ namespace ColmeiaStudios.SoMaisUmPedido
             SetPreparationMode(true);
         }
 
-        public void ConfigureClosedForOrder(string id, string displayName, LunchboxType type)
+        public void ConfigureClosedForOrder(string id, string displayName, LunchboxType type, int visualVariant = -1)
         {
             Configure(id, displayName, type);
+            ClosedVisualVariant = visualVariant;
             isClosed = true;
             CloseForTransport();
         }

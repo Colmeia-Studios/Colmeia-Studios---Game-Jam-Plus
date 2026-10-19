@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7431ceabd5f1eec2693db369b417bb52, type: 3}
   m_Name: Order_Rice
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.OrderData
-  id: 03
+  id: 13
   displayName: Rice
   lunchboxType: 4
   requiredIngredients:

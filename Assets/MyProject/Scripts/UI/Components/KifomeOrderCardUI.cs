@@ -90,7 +90,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             if (orderNumberText != null)
             {
-                orderNumberText.text = $"#{order.OrderId}";
+                orderNumberText.text = OrderNumberFormatter.Format(order.OrderId);
             }
 
             if (orderNameText != null)
@@ -175,9 +175,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
         {
             switch (state)
             {
-                case OrderState.Available: return "Disponível";
-                case OrderState.InPreparation: return "Em preparação";
-                case OrderState.Expired: return "Expirado";
+                case OrderState.Available: return "Available";
+                case OrderState.InPreparation: return "In preparation";
+                case OrderState.Expired: return "Expired";
                 default: return state.ToString();
             }
         }

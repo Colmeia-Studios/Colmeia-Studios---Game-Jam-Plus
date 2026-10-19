@@ -14,5 +14,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ColmeiaStudios.SoMaisUmPedido.HouseData
   id: 02
   customerName: "Jer\xF4nimo"
-  description: Gray house with a fence
-  houseImage: {fileID: 0}
+  description: House Number #2
+  houseImage: {fileID: 21300000, guid: 62835e8d545bdc851914b369797bcd80, type: 3}

@@ -71,6 +71,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
 
             preparationCanvas.renderMode = RenderMode.ScreenSpaceCamera;
             preparationCanvas.worldCamera = cookCamera;
+            preparationCanvas.planeDistance = 0.02f;
             preparationCanvas.overrideSorting = true;
             preparationCanvas.sortingOrder = 100;
 
@@ -115,9 +116,9 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 SetIngredientsVisible(true);
                 bool carryingMealbox = cookPlayer.CarriedPreparedMealbox != null;
                 string status = carryingMealbox
-                    ? "Marmita pronta — leve ao balcão."
+                    ? "Mealbox ready — take it to the counter."
                     : string.IsNullOrWhiteSpace(cookPlayer.PreparationMessage)
-                        ? "Selecione um pedido no telefone para começar."
+                        ? "Select an order on the phone to begin."
                         : cookPlayer.PreparationMessage;
                 SetRecipeAndStatus(string.Empty, status);
                 return;
@@ -128,7 +129,7 @@ namespace ColmeiaStudios.SoMaisUmPedido
                 ClearIndicators();
                 SetIngredientsVisible(false);
                 SetRecipeAndStatus(order.DisplayName,
-                    $"A preparação do pedido #{order.OrderId} continua. O conteúdo foi preservado.");
+                    $"Order {OrderNumberFormatter.Format(order.OrderId)} is still in preparation. Its contents were preserved.");
                return;
             }
 
@@ -181,15 +182,15 @@ namespace ColmeiaStudios.SoMaisUmPedido
             bool preparationComplete = exactContents && correctLunchbox && !carryingOtherMealbox;
             string completionError = cookPlayer.PreparationMessage;
             if (string.IsNullOrWhiteSpace(completionError) ||
-                !completionError.StartsWith("Não foi possível", StringComparison.OrdinalIgnoreCase))
+                !completionError.StartsWith("Could not", StringComparison.OrdinalIgnoreCase))
                 completionError = null;
             SetRecipeAndStatus(order.DisplayName, preparationComplete
-                ? completionError ?? "Receita correta — concluindo a marmita."
+                ? completionError ?? "Recipe complete — closing the mealbox."
                 : correctLunchbox && exactContents && carryingOtherMealbox
-                    ? "Receita pronta. Deposite primeiro a marmita que está carregando."
+                    ? "Recipe complete. Deposit the mealbox you are carrying first."
                 : !correctLunchbox
-                    ? $"Pegue na estação a marmita de {GetCompartmentCount(order.LunchboxType)} compartimento(s) do pedido #{order.OrderId}."
-                    : $"Preparação do pedido #{order.OrderId}: ingredientes pendentes ou extras.");
+                    ? $"Collect the {GetCompartmentCount(order.LunchboxType)}-compartment mealbox for order {OrderNumberFormatter.Format(order.OrderId)} from its station."
+                    : $"Order {OrderNumberFormatter.Format(order.OrderId)}: ingredients are missing or extra.");
         }
 
         private static int GetCompartmentCount(LunchboxType type)

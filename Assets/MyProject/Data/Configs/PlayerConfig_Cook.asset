@@ -16,7 +16,7 @@ MonoBehaviour:
   actionMap: PlayerOne
   controlScheme: KeyboardMouse
   useMouseLook: 1
-  moveSpeed: 5
+  moveSpeed: 10
   gravity: -20
   lookSensitivity: 2.2
   minPitch: -80
